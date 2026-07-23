@@ -57,7 +57,7 @@ class EngineTests(unittest.TestCase):
 
         self.assertEqual(player.enemy.name, "黏液大公·噗叽伯爵")
 
-    def test_death_keeps_equipment_currency_and_remaining_items(self):
+    def test_death_keeps_equipment_crystals_half_gold_and_two_items(self):
         engine = GameEngine(random.Random(1))
         player = Player(1, "测试者", level=8, exp=77, floor=20, hp=1, gold=888, crystals=9)
         player.weapon, player.clothing = "传说之剑", "龙鳞甲"
@@ -65,10 +65,9 @@ class EngineTests(unittest.TestCase):
         player.enemy = Enemy("测试怪", 999, 999, 999, 1)
         engine.attack(player)
         self.assertEqual((player.level, player.exp, player.floor), (1, 0, 1))
-        self.assertEqual((player.gold, player.crystals), (888, 9))
+        self.assertEqual((player.gold, player.crystals), (444, 9))
         self.assertEqual((player.weapon, player.clothing), ("传说之剑", "龙鳞甲"))
-        self.assertGreater(player.consumables["治疗药水"], 0)
-        self.assertLess(player.consumables["治疗药水"], 5)
+        self.assertEqual(player.consumables, {"治疗药水": 2})
 
     def test_boss_victory_advances_floor(self):
         engine = GameEngine(random.Random(1))
@@ -168,6 +167,18 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(player.pending_event, "mimic")
         self.assertIsNone(player.enemy)
 
+    def test_admin_forced_major_boss_survives_panel_migration_check(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "管理员", floor=1)
+
+        engine.force_event(player, "major_boss")
+        forced_name = player.enemy.name
+        engine.ensure_floor(player)
+
+        self.assertEqual(player.enemy.boss_kind, "大 Boss")
+        self.assertEqual(player.enemy.name, forced_name)
+        self.assertIn(forced_name, engine.MAJOR_BOSS_NAMES.values())
+
     def test_admin_non_monster_events_never_create_an_enemy(self):
         for event in (
             "chest", "mimic", "fountain", "merchant", "fairy", "mystery",
@@ -203,7 +214,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(player.mp, 26)
         self.assertEqual(player.energy, 31)
 
-    def test_death_only_drops_some_consumables(self):
+    def test_death_retains_exactly_two_consumable_units(self):
         engine = GameEngine(random.Random(1))
         player = Player(1, "冒险者", hp=1)
         player.consumables = {"治疗药水": 5, "魔力药水": 4, "精力药水": 3}
@@ -215,8 +226,8 @@ class EngineTests(unittest.TestCase):
         after = sum(player.consumables.values())
         self.assertTrue(result.death)
         self.assertEqual(result.title, "💀 你死了")
+        self.assertEqual(after, 2)
         self.assertLess(after, before)
-        self.assertGreater(after, 0)
 
 
 if __name__ == "__main__":
