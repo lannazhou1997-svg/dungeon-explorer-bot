@@ -14,7 +14,7 @@ from game.storage import PlayerStore
 
 load_dotenv()
 engine, store = GameEngine(), PlayerStore()
-ENTRANCE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-entrance.png"
+ENTRANCE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-entrance.jpg"
 views_added = False
 
 
@@ -174,7 +174,7 @@ class EntrancePanel(discord.ui.LayoutView):
         container.add_item(discord.ui.Separator())
         gallery = discord.ui.MediaGallery()
         gallery.add_item(
-            media="attachment://youden-cave-entrance.png",
+            media="attachment://youden-cave-entrance.jpg",
             description="幽灯岩窟的入口",
         )
         container.add_item(gallery)
@@ -203,7 +203,7 @@ async def ensure_entrance_panel() -> None:
     try:
         channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
         message_id = store.get_setting("entrance_panel_message_id")
-        image = discord.File(ENTRANCE_IMAGE, filename="youden-cave-entrance.png")
+        image = discord.File(ENTRANCE_IMAGE, filename="youden-cave-entrance.jpg")
         if message_id:
             try:
                 message = await channel.fetch_message(int(message_id))
