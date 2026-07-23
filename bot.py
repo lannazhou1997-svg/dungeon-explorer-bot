@@ -37,94 +37,6 @@ def floor_scene_file(floor: int) -> discord.File:
     return discord.File(FLOOR_SCENE_DIR / filename, filename=filename)
 
 
-def player_embeds(player: Player, result: GameResult | None = None) -> list[discord.Embed]:
-    engine.ensure_floor(player)
-    color = discord.Color.red() if result and result.danger else discord.Color.dark_teal()
-    title = result.title if result else "🧭 正在探索"
-    message = result.message if result else "你小心翼翼地观察着四周……"
-    scene = discord.Embed(
-        title=f"🏰 幽灯岩窟｜第 {player.floor} / 100 层",
-        color=0x6554A6,
-    )
-    scene.set_image(url=f"attachment://{floor_scene_filename(player.floor)}")
-    embed = discord.Embed(
-        title=title,
-        description=message,
-        color=color,
-    )
-    if player.enemy:
-        enemy = player.enemy
-        embed.add_field(
-            name="━━━━━━━━━━　👾 敌影出现　━━━━━━━━━━",
-            value=f"### {enemy.boss_kind}｜{enemy.name}\n> “{enemy.catchphrase}”",
-            inline=False,
-        )
-        embed.add_field(
-            name="怪物状态",
-            value=(
-                f"❤️ 生命　`{bar(enemy.hp, enemy.max_hp)}` **{enemy.hp}/{enemy.max_hp}**\n"
-                f"⚔️ 攻击　`{bar(enemy.attack, max(1, enemy.attack + 10))}` **{enemy.attack}**\n"
-                f"☠️ 等级　`{bar(enemy.level, max(10, player.floor + 10))}` **Lv.{enemy.level}**"
-            ),
-            inline=False,
-        )
-    else:
-        section = "🧭 探索记录"
-        if "宝箱" in title:
-            section = "📦 宝藏出现"
-        elif "泉水" in title:
-            section = "⛲ 奇遇出现"
-        elif "商人" in title or "交易" in title:
-            section = "🧳 商人出现"
-        elif "陷阱" in title:
-            section = "🪤 机关出现"
-        embed.add_field(
-            name=f"━━━━━━━━━━　{section}　━━━━━━━━━━",
-            value="\u200b",
-            inline=False,
-        )
-    embed.add_field(
-        name="━━━━━━━━━━　🧙 冒险者　━━━━━━━━━━",
-        value="\u200b",
-        inline=False,
-    )
-    embed.add_field(
-        name=f"🧙 冒险者｜{player.name}",
-        value=f"**Lv.{player.level}**　EXP {player.exp}/{player.exp_required}\n"
-              f"🗡️ 基础攻击 {8 + player.level * 2}～{12 + player.level * 3}"
-              f"　+ 武器 **{player.weapon_attack}**",
-        inline=True,
-    )
-    embed.add_field(
-        name="📊 冒险者状态",
-        value=(
-            f"❤️ 体力　`{bar(player.hp, player.max_hp)}` **{player.hp}/{player.max_hp}**\n"
-            f"💧 魔力　`{bar(player.mp, player.max_mp)}` **{player.mp}/{player.max_mp}**\n"
-            f"⚡ 精力　`{bar(player.energy, player.max_energy)}` **{player.energy}/{player.max_energy}**"
-        ),
-        inline=True,
-    )
-    embed.add_field(name="━━━━━━━━━━　行囊　━━━━━━━━━━", value="\u200b", inline=False)
-    embed.add_field(
-        name="💰 货币",
-        value=f"🪙 金币 **{player.gold}**\n🔮 水晶 **{player.crystals}**",
-        inline=True,
-    )
-    embed.add_field(
-        name="⚔️ 装备",
-        value=f"武器：**{player.weapon}**（+{player.weapon_attack}）\n服装：**{player.clothing}**",
-        inline=True,
-    )
-    embed.add_field(
-        name="🎒 道具与进度",
-        value=f"🧪 治疗药水 × **{player.consumables.get('治疗药水', 0)}**\n"
-              f"👣 探索进度 **{player.steps}/{player.required_steps}**",
-        inline=True,
-    )
-    embed.set_footer(text="探索消耗 3 精力｜互动消耗 2 精力｜15% 概率超常发挥（×1.5）")
-    return [scene, embed]
-
-
 def inventory_embed(player: Player) -> discord.Embed:
     engine.ensure_floor(player)
     items = "\n".join(
@@ -162,26 +74,127 @@ def inventory_embed(player: Player) -> discord.Embed:
     return embed
 
 
-class DungeonView(discord.ui.View):
-    def __init__(self, owner_id: int, player: Player):
+def event_section(title: str, has_enemy: bool) -> str:
+    if has_enemy:
+        return "👾 敌影出现"
+    if "宝箱" in title:
+        return "📦 宝藏出现"
+    if "泉水" in title:
+        return "⛲ 奇遇出现"
+    if "商人" in title:
+        return "🧳 商人出现"
+    if "精灵" in title:
+        return "🧚 精灵出现"
+    if "石像" in title:
+        return "🗿 神秘物体出现"
+    if any(word in title for word in ("陷阱", "落石", "偷袭", "背包")):
+        return "🪤 意外发生"
+    return "🧭 探索记录"
+
+
+def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, str]:
+    title = result.title if result else "🧭 正在探索"
+    message = result.message if result else "你小心翼翼地观察着四周……"
+    event = f"# {title}\n{message}"
+    if player.enemy:
+        enemy = player.enemy
+        event += (
+            f"\n\n## {event_section(title, True)}\n"
+            f"### {enemy.boss_kind}｜{enemy.name}\n> “{enemy.catchphrase}”\n"
+            f"❤️ 生命　`{bar(enemy.hp, enemy.max_hp)}` **{enemy.hp}/{enemy.max_hp}**\n"
+            f"⚔️ 攻击　`{bar(enemy.attack, max(1, enemy.attack + 10))}` **{enemy.attack}**\n"
+            f"☠️ 等级　`{bar(enemy.level, max(10, player.floor + 10))}` **Lv.{enemy.level}**"
+        )
+    else:
+        event += f"\n\n## {event_section(title, False)}"
+    status = (
+        f"## 🧙 冒险者｜{player.name}\n"
+        f"**Lv.{player.level}**　EXP **{player.exp}/{player.exp_required}**　"
+        f"🗡️ 攻击 **{8 + player.level * 2}～{12 + player.level * 3} + {player.weapon_attack}**\n"
+        f"❤️ `{bar(player.hp, player.max_hp)}` **{player.hp}/{player.max_hp}**\n"
+        f"💧 `{bar(player.mp, player.max_mp)}` **{player.mp}/{player.max_mp}**\n"
+        f"⚡ `{bar(player.energy, player.max_energy)}` **{player.energy}/{player.max_energy}**\n\n"
+        f"## 🎒 行囊\n"
+        f"🪙 **{player.gold}**　🔮 **{player.crystals}**　"
+        f"⚔️ **{player.weapon} +{player.weapon_attack}**　👕 **{player.clothing}**\n"
+        f"🧪 治疗 **×{player.consumables.get('治疗药水', 0)}**　"
+        f"💧 魔力 **×{player.consumables.get('魔力药水', 0)}**　"
+        f"⚡ 精力 **×{player.consumables.get('精力药水', 0)}**\n"
+        f"👣 探索 **{player.steps}/{player.required_steps}**\n"
+        "-# 探索消耗 3 精力｜互动消耗 2 精力｜超常发挥 ×1.5"
+    )
+    return event, status
+
+
+class DungeonActionButton(discord.ui.Button):
+    def __init__(self, action: str, label: str, emoji: str, style: discord.ButtonStyle):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        panel = self.view
+        if isinstance(panel, DungeonPanel):
+            await panel.run_action(interaction, self.action)
+
+
+class DungeonActions(discord.ui.ActionRow):
+    def __init__(self, player: Player):
+        buttons: list[discord.ui.Button] = []
+        if player.enemy:
+            buttons.extend([
+                DungeonActionButton("attack", "普通攻击", "⚔️", discord.ButtonStyle.danger),
+                DungeonActionButton("skill", "技能", "✨", discord.ButtonStyle.danger),
+            ])
+        elif not player.pending_event:
+            buttons.append(DungeonActionButton("explore", "继续探索", "👣", discord.ButtonStyle.primary))
+        pending_buttons = {
+            "chest": ("interact_event", "打开宝箱", "📦"),
+            "mimic": ("interact_event", "打开宝箱", "📦"),
+            "fountain": ("interact_event", "汲取泉水", "⛲"),
+            "merchant": ("merchant_menu", "查看商品", "🧳"),
+            "fairy": ("interact_event", "帮助精灵", "🧚"),
+            "mystery": ("interact_event", "摸一下", "🗿"),
+        }
+        if player.pending_event in pending_buttons:
+            action, label, emoji = pending_buttons[player.pending_event]
+            buttons.append(DungeonActionButton(action, label, emoji, discord.ButtonStyle.success))
+        if player.pending_event in {"merchant", "fairy", "mystery"}:
+            buttons.append(DungeonActionButton("decline_event", "婉拒／离开", "🚶", discord.ButtonStyle.secondary))
+        super().__init__(*buttons[:5])
+
+
+class DungeonUtilities(discord.ui.ActionRow):
+    def __init__(self):
+        super().__init__(
+            DungeonActionButton("use_potion", "治疗药水", "🧪", discord.ButtonStyle.success),
+            DungeonActionButton("use_mana_potion", "魔力药水", "💧", discord.ButtonStyle.success),
+            DungeonActionButton("use_energy_potion", "精力药水", "⚡", discord.ButtonStyle.success),
+            DungeonActionButton("refresh", "刷新", "🔄", discord.ButtonStyle.secondary),
+        )
+
+
+class DungeonPanel(discord.ui.LayoutView):
+    def __init__(self, owner_id: int, player: Player, result: GameResult | None = None):
         super().__init__(timeout=900)
         self.owner_id = owner_id
-        if not player.enemy:
-            self.remove_item(self.attack)
-            self.remove_item(self.skill)
-        else:
-            self.remove_item(self.explore)
-        if player.pending_event not in {"chest", "mimic", "fountain", "merchant"}:
-            self.remove_item(self.interact)
-        elif player.pending_event in {"chest", "mimic"}:
-            self.interact.label = "打开宝箱"
-            self.interact.emoji = "📦"
-        elif player.pending_event == "fountain":
-            self.interact.label = "汲取泉水"
-            self.interact.emoji = "⛲"
-        else:
-            self.interact.label = "与商人交易"
-            self.interact.emoji = "🤝"
+        engine.ensure_floor(player)
+        event, status = player_panel_text(player, result)
+        container = discord.ui.Container(accent_colour=0x6554A6)
+        container.add_item(discord.ui.TextDisplay(f"# 🏰 幽灯岩窟｜第 {player.floor} / 100 层"))
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(
+            media=f"attachment://{floor_scene_filename(player.floor)}",
+            description=f"幽灯岩窟第 {player.floor} 层",
+        )
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(event))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(status))
+        container.add_item(discord.ui.Separator())
+        container.add_item(DungeonActions(player))
+        container.add_item(DungeonUtilities())
+        self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
@@ -189,53 +202,86 @@ class DungeonView(discord.ui.View):
         await interaction.response.send_message("这不是你的面板，请使用 `/地下城`。", ephemeral=True)
         return False
 
-    async def update(self, interaction: discord.Interaction, action: str) -> None:
+    async def run_action(self, interaction: discord.Interaction, action: str) -> None:
         player = store.get(interaction.user.id, interaction.user.display_name)
-        result = getattr(engine, action)(player)
+        if action == "merchant_menu":
+            await interaction.response.edit_message(view=MerchantPanel(self.owner_id, player))
+            return
+        if action == "skill":
+            result = engine.attack(player, use_skill=True)
+        elif action == "refresh":
+            result = None
+        else:
+            result = getattr(engine, action)(player)
         store.save(player)
         await interaction.response.edit_message(
-            embeds=player_embeds(player, result),
-            view=DungeonView(self.owner_id, player),
+            view=DungeonPanel(self.owner_id, player, result),
             attachments=[floor_scene_file(player.floor)],
         )
 
-    @discord.ui.button(label="继续探索", emoji="👣", style=discord.ButtonStyle.primary)
-    async def explore(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.update(interaction, "explore")
 
-    @discord.ui.button(label="普通攻击", emoji="⚔️", style=discord.ButtonStyle.danger)
-    async def attack(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.update(interaction, "attack")
+def merchant_table(player: Player) -> str:
+    rows = engine.merchant_offers(player.floor)
+    lines = ["物品　　　　　｜属性　　　　　　　　　｜价格"]
+    for _, name, effect, price in rows:
+        lines.append(f"{name:<8}｜{effect:<12}｜{price} 金币")
+    return "```text\n" + "\n".join(lines) + "```"
 
-    @discord.ui.button(label="技能", emoji="✨", style=discord.ButtonStyle.danger)
-    async def skill(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+
+class MerchantSelect(discord.ui.Select):
+    def __init__(self, player: Player):
+        options = [
+            discord.SelectOption(label=name, value=key, description=f"{effect}｜{price} 金币")
+            for key, name, effect, price in engine.merchant_offers(player.floor)
+        ]
+        super().__init__(placeholder="选择要购买的商品（可重复购买）", options=options)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
         player = store.get(interaction.user.id, interaction.user.display_name)
-        result = engine.attack(player, use_skill=True)
+        result = engine.buy_merchant_item(player, self.values[0])
+        store.save(player)
+        await interaction.response.edit_message(view=MerchantPanel(interaction.user.id, player, result))
+
+
+class MerchantFinishButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="结束交易", emoji="✅", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        player = store.get(interaction.user.id, interaction.user.display_name)
+        result = engine.decline_event(player)
         store.save(player)
         await interaction.response.edit_message(
-            embeds=player_embeds(player, result),
-            view=DungeonView(self.owner_id, player),
+            view=DungeonPanel(interaction.user.id, player, result),
             attachments=[floor_scene_file(player.floor)],
         )
 
-    @discord.ui.button(label="治疗药水", emoji="🧪", style=discord.ButtonStyle.success)
-    async def potion(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.update(interaction, "use_potion")
 
-    @discord.ui.button(label="刷新面板", emoji="🔄", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        engine.ensure_floor(player)
-        store.save(player)
-        await interaction.response.edit_message(
-            embeds=player_embeds(player),
-            view=DungeonView(self.owner_id, player),
-            attachments=[floor_scene_file(player.floor)],
-        )
+class MerchantMenuActions(discord.ui.ActionRow):
+    def __init__(self):
+        super().__init__(MerchantFinishButton())
 
-    @discord.ui.button(label="互动／交易", emoji="🤝", style=discord.ButtonStyle.success, row=1)
-    async def interact(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self.update(interaction, "interact_event")
+
+class MerchantPanel(discord.ui.LayoutView):
+    def __init__(self, owner_id: int, player: Player, result: GameResult | None = None):
+        super().__init__(timeout=600)
+        self.owner_id = owner_id
+        container = discord.ui.Container(accent_colour=0xD89A5B)
+        message = f"\n\n> {result.message}" if result else ""
+        container.add_item(discord.ui.TextDisplay(
+            f"# 🧳 旅行商人的移动商店\n"
+            f"当前金币：**{player.gold}**{message}\n\n{merchant_table(player)}"
+        ))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(MerchantSelect(player)))
+        container.add_item(MerchantMenuActions())
+        self.add_item(container)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("这不是你的商店菜单。", ephemeral=True)
+        return False
 
 
 class CaveSelect(discord.ui.Select):
@@ -259,8 +305,9 @@ class CaveSelect(discord.ui.Select):
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
         await interaction.response.edit_message(
-            embeds=player_embeds(player, result),
-            view=DungeonView(interaction.user.id, player),
+            content=None,
+            embed=None,
+            view=DungeonPanel(interaction.user.id, player, result),
             attachments=[floor_scene_file(player.floor)],
         )
 
@@ -447,6 +494,8 @@ async def dungeon(interaction: discord.Interaction) -> None:
     discord.app_commands.Choice(name="宝箱怪（先伪装）", value="mimic"),
     discord.app_commands.Choice(name="宁静泉水", value="fountain"),
     discord.app_commands.Choice(name="旅行商人", value="merchant"),
+    discord.app_commands.Choice(name="受伤的精灵", value="fairy"),
+    discord.app_commands.Choice(name="神秘石像", value="mystery"),
     discord.app_commands.Choice(name="随机陷阱", value="trap"),
     discord.app_commands.Choice(name="寂静长廊", value="empty"),
     discord.app_commands.Choice(name="小 Boss", value="small_boss"),
@@ -465,9 +514,7 @@ async def dungeon_test(
     result = engine.force_event(player, event.value)
     store.save(player)
     await interaction.response.send_message(
-        content=f"🛠️ 管理员测试事件：**{event.name}**",
-        embeds=player_embeds(player, result),
-        view=DungeonView(interaction.user.id, player),
+        view=DungeonPanel(interaction.user.id, player, result),
         file=floor_scene_file(player.floor),
         ephemeral=True,
     )
