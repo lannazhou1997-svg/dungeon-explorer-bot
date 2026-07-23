@@ -14,36 +14,71 @@ from game.storage import PlayerStore
 
 load_dotenv()
 engine, store = GameEngine(), PlayerStore()
-ENTRANCE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-entrance.jpg"
+TAVERN_IMAGE = Path(__file__).parent / "assets" / "adventurer-tavern-chibi.jpg"
+CAVE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-chibi.jpg"
 views_added = False
 
 
-def bar(value: int, maximum: int, width: int = 8) -> str:
+def bar(value: int, maximum: int, width: int = 10) -> str:
     filled = round(width * value / maximum) if maximum else 0
-    return "█" * filled + "░" * (width - filled)
+    return "▰" * filled + "▱" * (width - filled)
 
 
 def player_embed(player: Player, result: GameResult | None = None) -> discord.Embed:
     engine.ensure_floor(player)
     color = discord.Color.red() if result and result.danger else discord.Color.dark_teal()
-    embed = discord.Embed(title=result.title if result else "🏰 地下城探索",
-                          description=result.message if result else "未知的地下城正在等待你。", color=color)
-    embed.add_field(name="🧙 冒险者", value=f"**{player.name}**\nLv.{player.level} · EXP {player.exp}/{player.exp_required}", inline=True)
+    title = result.title if result else "🧭 正在探索"
+    message = result.message if result else "你小心翼翼地观察着四周……"
+    embed = discord.Embed(
+        title=title,
+        description=f"## 🏰 第 {player.floor} / 100 层\n{message}",
+        color=color,
+    )
+    if player.enemy:
+        enemy = player.enemy
+        embed.add_field(
+            name=f"👾 {enemy.boss_kind}｜{enemy.name}",
+            value=(
+                f"❤️ 生命　`{bar(enemy.hp, enemy.max_hp)}` **{enemy.hp}/{enemy.max_hp}**\n"
+                f"⚔️ 攻击　`{bar(enemy.attack, max(1, enemy.attack + 10))}` **{enemy.attack}**\n"
+                f"☠️ 等级　`{bar(enemy.level, max(10, player.floor + 10))}` **Lv.{enemy.level}**"
+            ),
+            inline=False,
+        )
     embed.add_field(
-        name="❤️ 体力　💧 魔力　⚡ 精力",
-        value=(f"**{player.hp}/{player.max_hp}**　　"
-               f"**{player.mp}/{player.max_mp}**　　"
-               f"**{player.energy}/{player.max_energy}**"),
+        name=f"🧙 冒险者｜{player.name}",
+        value=f"**Lv.{player.level}**　EXP {player.exp}/{player.exp_required}\n"
+              f"🗡️ 基础攻击 {8 + player.level * 2}～{12 + player.level * 3}"
+              f"　+ 武器 **{player.weapon_attack}**",
         inline=True,
     )
-    embed.add_field(name="🏰 当前进度", value=f"第 **{player.floor}** / 100 层\n👣 {player.steps}/{player.required_steps}", inline=True)
-    embed.add_field(name="💰 货币", value=f"金币 {player.gold}\n水晶 {player.crystals}", inline=True)
-    embed.add_field(name="⚔️ 装备", value=f"武器：{player.weapon}\n服装：{player.clothing}", inline=True)
-    embed.add_field(name="🎒 道具", value=f"治疗药水 × {player.consumables.get('治疗药水', 0)}", inline=True)
-    if player.enemy:
-        embed.add_field(name=f"👹 {player.enemy.boss_kind}：{player.enemy.name}",
-                        value=f"体力 {player.enemy.hp}/{player.enemy.max_hp}", inline=False)
-    embed.set_footer(text="探索消耗 3 精力；开宝箱额外消耗 2 精力")
+    embed.add_field(
+        name="📊 冒险者状态",
+        value=(
+            f"❤️ 体力　`{bar(player.hp, player.max_hp)}` **{player.hp}/{player.max_hp}**\n"
+            f"💧 魔力　`{bar(player.mp, player.max_mp)}` **{player.mp}/{player.max_mp}**\n"
+            f"⚡ 精力　`{bar(player.energy, player.max_energy)}` **{player.energy}/{player.max_energy}**"
+        ),
+        inline=True,
+    )
+    embed.add_field(name="━━━━━━━━━━　行囊　━━━━━━━━━━", value="\u200b", inline=False)
+    embed.add_field(
+        name="💰 货币",
+        value=f"🪙 金币 **{player.gold}**\n🔮 水晶 **{player.crystals}**",
+        inline=True,
+    )
+    embed.add_field(
+        name="⚔️ 装备",
+        value=f"武器：**{player.weapon}**（+{player.weapon_attack}）\n服装：**{player.clothing}**",
+        inline=True,
+    )
+    embed.add_field(
+        name="🎒 道具与进度",
+        value=f"🧪 治疗药水 × **{player.consumables.get('治疗药水', 0)}**\n"
+              f"👣 探索进度 **{player.steps}/{player.required_steps}**",
+        inline=True,
+    )
+    embed.set_footer(text="探索消耗 3 精力｜开宝箱消耗 2 精力｜15% 概率超常发挥")
     return embed
 
 
@@ -90,6 +125,10 @@ class DungeonView(discord.ui.View):
         store.save(player)
         await interaction.response.edit_message(embed=player_embed(player), view=self)
 
+    @discord.ui.button(label="互动／打开", emoji="📦", style=discord.ButtonStyle.success, row=1)
+    async def interact(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.update(interaction, "interact_event")
+
 
 class CaveSelect(discord.ui.Select):
     def __init__(self):
@@ -112,7 +151,9 @@ class CaveSelect(discord.ui.Select):
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
         await interaction.response.edit_message(
-            embed=player_embed(player, result), view=DungeonView(interaction.user.id)
+            embed=player_embed(player, result),
+            view=DungeonView(interaction.user.id),
+            attachments=[],
         )
 
 
@@ -133,9 +174,19 @@ class ExploreEntranceButton(discord.ui.Button):
         player = store.get(interaction.user.id, interaction.user.display_name)
         engine.ensure_floor(player)
         store.save(player)
+        embed = discord.Embed(
+            title="🕯️ 幽灯岩窟",
+            description=(
+                "笑脸幽火在洞口晃来晃去，一只史莱姆正努力躲在石头后面。\n"
+                "据说这里的宝箱都很有礼貌——至少打开之前是这样。\n\n"
+                "### 要进入洞窟探索吗？"
+            ),
+            color=0x8B8FE8,
+        )
+        embed.set_image(url="attachment://youden-cave-chibi.jpg")
+        cave_image = discord.File(CAVE_IMAGE, filename="youden-cave-chibi.jpg")
         await interaction.response.send_message(
-            "## 🗺️ 选择洞窟\n目前开放的探索区域如下。你的个人状态会在进入后显示。",
-            view=CaveSelectionView(), ephemeral=True,
+            embed=embed, file=cave_image, view=CaveSelectionView(), ephemeral=True,
         )
 
 
@@ -164,8 +215,8 @@ class EntrancePanel(discord.ui.LayoutView):
         super().__init__(timeout=None)
         container = discord.ui.Container(accent_colour=0x48B8C7)
         container.add_item(discord.ui.Section(
-            "# 🏔️ 地下城入口",
-            "### 幽蓝的灯火沿着石阶延伸，黑暗中似乎有什么正在等待。",
+            "# 🍺 冒险者酒馆",
+            "### 欢迎回来！接取委托、整理行囊，然后从这里踏上新的冒险。",
             accessory=discord.ui.Thumbnail(
                 client_user.display_avatar.url,
                 description="地下城探索 Bot",
@@ -174,15 +225,15 @@ class EntrancePanel(discord.ui.LayoutView):
         container.add_item(discord.ui.Separator())
         gallery = discord.ui.MediaGallery()
         gallery.add_item(
-            media="attachment://youden-cave-entrance.jpg",
-            description="幽灯岩窟的入口",
+            media="attachment://adventurer-tavern-chibi.jpg",
+            description="热闹又温暖的冒险者酒馆",
         )
         container.add_item(gallery)
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "## 要进入洞窟探索吗？\n"
-            "> 每次探索都会消耗精力，途中可能遭遇怪物、宝箱、商店与陷阱。\n"
-            "> 每层由 Boss 守关，每逢第 5 层将出现大 Boss。"
+            "## 📜 今日冒险委托\n"
+            "> 前往未知洞窟进行探索，收集金币、装备与奇怪的宝物。\n"
+            "> 注意：某些宝箱可能只是演技特别好的怪物。"
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
@@ -203,7 +254,7 @@ async def ensure_entrance_panel() -> None:
     try:
         channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
         message_id = store.get_setting("entrance_panel_message_id")
-        image = discord.File(ENTRANCE_IMAGE, filename="youden-cave-entrance.jpg")
+        image = discord.File(TAVERN_IMAGE, filename="adventurer-tavern-chibi.jpg")
         if message_id:
             try:
                 message = await channel.fetch_message(int(message_id))
