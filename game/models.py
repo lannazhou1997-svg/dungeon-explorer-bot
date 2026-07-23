@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -14,6 +13,7 @@ class Enemy:
     exp_reward: int
     boss_kind: str = "普通怪物"
     level: int = 1
+    catchphrase: str = "它正不怀好意地盯着你的行囊。"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
