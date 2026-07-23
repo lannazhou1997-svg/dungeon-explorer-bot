@@ -1,4 +1,3 @@
-
 import random
 import unittest
 
@@ -46,13 +45,13 @@ class EngineTests(unittest.TestCase):
 
         result = engine._event_mimic(player)
 
-        self.assertEqual(result.title, "📦 发现宝箱？")
+        self.assertEqual(result.title, "📦 你遇到了宝箱？")
         self.assertIsNone(player.enemy)
         self.assertEqual(player.pending_event, "mimic")
 
         reveal = engine.interact_event(player)
 
-        self.assertEqual(reveal.title, "😈 宝箱怪现身！")
+        self.assertEqual(reveal.title, "😈 你遇到了宝箱怪！")
         self.assertIsNotNone(player.enemy)
         self.assertEqual(player.enemy.boss_kind, "宝箱怪")
         self.assertIsNone(player.pending_event)
@@ -70,6 +69,18 @@ class EngineTests(unittest.TestCase):
         high_engine.attack(high)
 
         self.assertGreater(high_before - high.enemy.hp, low_before - low.enemy.hp)
+
+    def test_merchant_sells_a_potion(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "顾客", floor=3, gold=100)
+        engine._event_shop(player)
+
+        result = engine.interact_event(player)
+
+        self.assertEqual(result.title, "🤝 交易完成！")
+        self.assertEqual(player.gold, 69)
+        self.assertEqual(player.consumables["治疗药水"], 3)
+        self.assertIsNone(player.pending_event)
 
 
 if __name__ == "__main__":
