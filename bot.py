@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import os
@@ -17,6 +18,7 @@ engine, store = GameEngine(), PlayerStore()
 TAVERN_IMAGE = Path(__file__).parent / "assets" / "adventurer-tavern-chibi-hq.jpg"
 CAVE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-chibi.jpg"
 CAVE_THUMBNAIL = Path(__file__).parent / "assets" / "youden-cave-square.jpg"
+FLOOR_SCENE_DIR = Path(__file__).parent / "assets" / "floors"
 views_added = False
 
 
@@ -25,22 +27,45 @@ def bar(value: int, maximum: int, width: int = 10) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 
-def player_embed(player: Player, result: GameResult | None = None) -> discord.Embed:
+def floor_scene_filename(floor: int) -> str:
+    zone = min(9, max(0, (floor - 1) // 10))
+    return f"floor-zone-{zone + 1:02d}.jpg"
+
+
+def floor_scene_file(floor: int) -> discord.File:
+    filename = floor_scene_filename(floor)
+    return discord.File(FLOOR_SCENE_DIR / filename, filename=filename)
+
+
+def player_embeds(player: Player, result: GameResult | None = None) -> list[discord.Embed]:
     engine.ensure_floor(player)
     color = discord.Color.red() if result and result.danger else discord.Color.dark_teal()
     title = result.title if result else "🧭 正在探索"
     message = result.message if result else "你小心翼翼地观察着四周……"
+    scene = discord.Embed(
+        title=f"🏰 幽灯岩窟｜第 {player.floor} / 100 层",
+        color=0x6554A6,
+    )
+    scene.set_image(url=f"attachment://{floor_scene_filename(player.floor)}")
     embed = discord.Embed(
-        title=f"🏰 第 {player.floor} / 100 层",
-        description=f"# {title}\n{message}",
+        title=title,
+        description=message,
         color=color,
     )
-    embed.set_thumbnail(url="attachment://youden-cave-square.jpg")
     if player.enemy:
         enemy = player.enemy
         embed.add_field(
             name="━━━━━━━━━━　👾 敌影出现　━━━━━━━━━━",
             value=f"### {enemy.boss_kind}｜{enemy.name}\n> “{enemy.catchphrase}”",
+            inline=False,
+        )
+        embed.add_field(
+            name="怪物状态",
+            value=(
+                f"❤️ 生命　`{bar(enemy.hp, enemy.max_hp)}` **{enemy.hp}/{enemy.max_hp}**\n"
+                f"⚔️ 攻击　`{bar(enemy.attack, max(1, enemy.attack + 10))}` **{enemy.attack}**\n"
+                f"☠️ 等级　`{bar(enemy.level, max(10, player.floor + 10))}` **Lv.{enemy.level}**"
+            ),
             inline=False,
         )
     else:
@@ -56,15 +81,6 @@ def player_embed(player: Player, result: GameResult | None = None) -> discord.Em
         embed.add_field(
             name=f"━━━━━━━━━━　{section}　━━━━━━━━━━",
             value="\u200b",
-            inline=False,
-        )
-        embed.add_field(
-            name="怪物状态",
-            value=(
-                f"❤️ 生命　`{bar(enemy.hp, enemy.max_hp)}` **{enemy.hp}/{enemy.max_hp}**\n"
-                f"⚔️ 攻击　`{bar(enemy.attack, max(1, enemy.attack + 10))}` **{enemy.attack}**\n"
-                f"☠️ 等级　`{bar(enemy.level, max(10, player.floor + 10))}` **Lv.{enemy.level}**"
-            ),
             inline=False,
         )
     embed.add_field(
@@ -106,7 +122,7 @@ def player_embed(player: Player, result: GameResult | None = None) -> discord.Em
         inline=True,
     )
     embed.set_footer(text="探索消耗 3 精力｜互动消耗 2 精力｜15% 概率超常发挥（×1.5）")
-    return embed
+    return [scene, embed]
 
 
 def inventory_embed(player: Player) -> discord.Embed:
@@ -178,8 +194,9 @@ class DungeonView(discord.ui.View):
         result = getattr(engine, action)(player)
         store.save(player)
         await interaction.response.edit_message(
-            embed=player_embed(player, result),
+            embeds=player_embeds(player, result),
             view=DungeonView(self.owner_id, player),
+            attachments=[floor_scene_file(player.floor)],
         )
 
     @discord.ui.button(label="继续探索", emoji="👣", style=discord.ButtonStyle.primary)
@@ -196,8 +213,9 @@ class DungeonView(discord.ui.View):
         result = engine.attack(player, use_skill=True)
         store.save(player)
         await interaction.response.edit_message(
-            embed=player_embed(player, result),
+            embeds=player_embeds(player, result),
             view=DungeonView(self.owner_id, player),
+            attachments=[floor_scene_file(player.floor)],
         )
 
     @discord.ui.button(label="治疗药水", emoji="🧪", style=discord.ButtonStyle.success)
@@ -210,8 +228,9 @@ class DungeonView(discord.ui.View):
         engine.ensure_floor(player)
         store.save(player)
         await interaction.response.edit_message(
-            embed=player_embed(player),
+            embeds=player_embeds(player),
             view=DungeonView(self.owner_id, player),
+            attachments=[floor_scene_file(player.floor)],
         )
 
     @discord.ui.button(label="互动／交易", emoji="🤝", style=discord.ButtonStyle.success, row=1)
@@ -239,11 +258,10 @@ class CaveSelect(discord.ui.Select):
         engine.ensure_floor(player)
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
-        thumbnail = discord.File(CAVE_THUMBNAIL, filename="youden-cave-square.jpg")
         await interaction.response.edit_message(
-            embed=player_embed(player, result),
+            embeds=player_embeds(player, result),
             view=DungeonView(interaction.user.id, player),
-            attachments=[thumbnail],
+            attachments=[floor_scene_file(player.floor)],
         )
 
 
@@ -446,12 +464,11 @@ async def dungeon_test(
     engine.ensure_floor(player)
     result = engine.force_event(player, event.value)
     store.save(player)
-    thumbnail = discord.File(CAVE_THUMBNAIL, filename="youden-cave-square.jpg")
     await interaction.response.send_message(
         content=f"🛠️ 管理员测试事件：**{event.name}**",
-        embed=player_embed(player, result),
+        embeds=player_embeds(player, result),
         view=DungeonView(interaction.user.id, player),
-        file=thumbnail,
+        file=floor_scene_file(player.floor),
         ephemeral=True,
     )
 
