@@ -33,6 +33,8 @@ class GameEngine:
         self.ensure_floor(player)
         if player.enemy:
             return GameResult("无法继续", "必须先结束当前战斗。", True)
+        if player.pending_event:
+            return GameResult("等待交互", "请先处理眼前的事件。")
         if player.energy < 3:
             return GameResult("精力不足", "探索需要 3 点精力，请使用恢复道具。")
         player.energy -= 3
@@ -48,11 +50,19 @@ class GameEngine:
             return GameResult("没有敌人", "当前没有可以攻击的目标。")
         if use_skill and player.mp < 10:
             return GameResult("魔力不足", "释放技能需要 10 点魔力。")
-        damage = self.rng.randint(12, 20) + (player.level - 1) * 2
+        base_min = 8 + player.level * 2
+        base_max = 12 + player.level * 3
+        base_damage = self.rng.randint(base_min, base_max)
+        exceptional = self.rng.random() < 0.15
+        if exceptional:
+            base_damage = round(base_damage * 1.7)
+        damage = base_damage + player.weapon_attack
         label = "奥术斩击" if use_skill else "普通攻击"
         if use_skill:
             player.mp -= 10
             damage = int(damage * 1.8)
+        performance = "，触发 **超常发挥！**" if exceptional else ""
+        formula = f"（基础 {base_damage} + 武器 {player.weapon_attack}）"
         enemy.hp = max(0, enemy.hp - damage)
         if enemy.hp == 0:
             reward_gold = self.rng.randint(6, 12) * max(1, player.floor)
@@ -69,13 +79,37 @@ class GameEngine:
                     progress = f"\n通往第 {player.floor} 层的道路开启了。"
                 else:
                     progress = "\n你征服了地下城第 100 层！"
-            return GameResult("战斗胜利", f"你以{label}造成 {damage} 点伤害并击败 **{enemy.name}**！"
+            return GameResult("🎉 战斗胜利", f"你以{label}造成 **{damage}** 点伤害{performance} {formula}，击败 **{enemy.name}**！"
                               f"\n获得 {exp} 经验和 {reward_gold} 金币。{level_text}{progress}")
         incoming = self.rng.randint(max(1, enemy.attack - 3), enemy.attack + 3)
         player.hp = max(0, player.hp - incoming)
         if not player.is_alive:
             return self._die(player, f"你造成 {damage} 点伤害，但被 **{enemy.name}** 击败。")
-        return GameResult("战斗中", f"你以{label}造成 {damage} 点伤害；{enemy.name} 反击造成 {incoming} 点伤害。", True)
+        return GameResult("⚔️ 激烈战斗", f"你以{label}造成 **{damage}** 点伤害{performance} {formula}；"
+                          f"{enemy.name} 反击造成 **{incoming}** 点伤害。", True)
+
+    def interact_event(self, player: Player) -> GameResult:
+        event = player.pending_event
+        if not event:
+            return GameResult("没有可交互事件", "眼前没有需要处理的物品。")
+        if player.energy < 2:
+            return GameResult("精力不足", "打开宝箱需要 2 点精力。")
+        player.energy -= 2
+        player.pending_event = None
+        if event == "mimic":
+            player.enemy = self._make_monster(player.floor, mimic=True)
+            return GameResult(
+                "😈 宝箱怪现身！",
+                f"宝箱突然长出牙齿！**{player.enemy.name}** 扑了过来！",
+                True,
+            )
+        gold = self.rng.randint(8, 20) * max(1, player.floor)
+        player.gold += gold
+        extra = ""
+        if self.rng.random() < 0.25:
+            player.consumables["治疗药水"] = player.consumables.get("治疗药水", 0) + 1
+            extra = "，以及一瓶治疗药水"
+        return GameResult("🎁 宝箱开启！", f"消耗 2 点精力，获得 **{gold} 金币**{extra}。")
 
     def use_potion(self, player: Player) -> GameResult:
         count = player.consumables.get("治疗药水", 0)
@@ -108,14 +142,16 @@ class GameEngine:
         player.max_energy, player.energy = 100, 100
         player.floor, player.steps = 1, 0
         player.required_steps = self.required_steps(1)
-        player.consumables, player.enemy = {}, None
+        player.consumables, player.enemy, player.pending_event = {}, None, None
         return GameResult("冒险失败", prefix + "\n等级、经验、层数和普通道具已重置；装备及剩余货币得以保留。", True)
 
     def _make_monster(self, floor: int, mimic: bool = False) -> Enemy:
         scale = 1 + floor * 0.10
         name = "贪婪宝箱怪" if mimic else self.rng.choice(["洞穴史莱姆", "骸骨卫兵", "暗影蝙蝠", "地穴蜘蛛"])
         hp = int((48 if mimic else 38) * scale)
-        return Enemy(name, hp, hp, max(5, int(7 * scale)), 18 + floor * 3, "宝箱怪" if mimic else "普通怪物")
+        level = max(1, floor + self.rng.randint(-1, 1))
+        return Enemy(name, hp, hp, max(5, int(7 * scale)), 18 + floor * 3,
+                     "宝箱怪" if mimic else "普通怪物", level)
 
     def _make_boss(self, floor: int) -> Enemy:
         major = floor % 5 == 0
@@ -123,28 +159,20 @@ class GameEngine:
         hp = int((115 if major else 78) * scale)
         names = ["深渊领主", "噬魂魔像", "猩红女王"] if major else ["守门石像", "地穴骑士", "腐化祭司"]
         return Enemy(self.rng.choice(names), hp, hp, int((13 if major else 10) * scale),
-                     80 + floor * (10 if major else 6), "大 Boss" if major else "小 Boss")
+                     80 + floor * (10 if major else 6), "大 Boss" if major else "小 Boss",
+                     floor + (3 if major else 1))
 
     def _event_monster(self, player: Player) -> GameResult:
         player.enemy = self._make_monster(player.floor)
         return GameResult("遭遇怪物", f"**{player.enemy.name}** 挡住了去路！", True)
 
     def _event_mimic(self, player: Player) -> GameResult:
-        player.energy = max(0, player.energy - 2)
-        player.enemy = self._make_monster(player.floor, True)
-        return GameResult("宝箱怪！", "宝箱突然张开獠牙，额外消耗 2 点精力！", True)
+        player.pending_event = "mimic"
+        return GameResult("📦 发现宝箱？", "一个宝箱安静地摆在路中央。要打开看看吗？")
 
     def _event_chest(self, player: Player) -> GameResult:
-        if player.energy < 2:
-            return GameResult("发现宝箱", "你没有足够精力打开它，只能遗憾离开。")
-        player.energy -= 2
-        gold = self.rng.randint(8, 20) * max(1, player.floor)
-        player.gold += gold
-        extra = ""
-        if self.rng.random() < 0.25:
-            player.consumables["治疗药水"] = player.consumables.get("治疗药水", 0) + 1
-            extra = "，以及一瓶治疗药水"
-        return GameResult("发现宝箱", f"消耗 2 点精力，获得 {gold} 金币{extra}。")
+        player.pending_event = "chest"
+        return GameResult("📦 发现宝箱？", "一个宝箱安静地摆在路中央。要打开看看吗？")
 
     def _event_trap(self, player: Player) -> GameResult:
         damage = self.rng.randint(5, 12) + player.floor // 3
