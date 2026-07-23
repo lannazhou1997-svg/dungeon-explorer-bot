@@ -47,7 +47,7 @@ class EngineTests(unittest.TestCase):
 
         result = engine._event_mimic(player)
 
-        self.assertEqual(result.title, "📦 你遇到了宝箱？")
+        self.assertEqual(result.title, "📦 你遇到了宝箱")
         self.assertIsNone(player.enemy)
         self.assertEqual(player.pending_event, "mimic")
 
@@ -72,17 +72,19 @@ class EngineTests(unittest.TestCase):
 
         self.assertGreater(high_before - high.enemy.hp, low_before - low.enemy.hp)
 
-    def test_merchant_sells_a_potion(self):
+    def test_merchant_menu_supports_repeated_purchases(self):
         engine = GameEngine(random.Random(1))
-        player = Player(1, "顾客", floor=3, gold=100)
+        player = Player(1, "顾客", floor=3, gold=200)
         engine._event_shop(player)
 
-        result = engine.interact_event(player)
+        first = engine.buy_merchant_item(player, "healing_potion")
+        second = engine.buy_merchant_item(player, "healing_potion")
 
-        self.assertEqual(result.title, "🤝 交易完成！")
-        self.assertEqual(player.gold, 69)
-        self.assertEqual(player.consumables["治疗药水"], 3)
-        self.assertIsNone(player.pending_event)
+        self.assertEqual(first.title, "🛍️ 购买成功")
+        self.assertEqual(second.title, "🛍️ 购买成功")
+        self.assertEqual(player.gold, 140)
+        self.assertEqual(player.consumables["治疗药水"], 4)
+        self.assertEqual(player.pending_event, "merchant")
 
     def test_fountain_waits_for_interaction(self):
         engine = GameEngine(random.Random(1))
@@ -107,12 +109,12 @@ class EngineTests(unittest.TestCase):
 
         result = engine.force_event(player, "mimic")
 
-        self.assertEqual(result.title, "📦 你遇到了宝箱？")
+        self.assertEqual(result.title, "📦 你遇到了宝箱")
         self.assertEqual(player.pending_event, "mimic")
         self.assertIsNone(player.enemy)
 
     def test_admin_non_monster_events_never_create_an_enemy(self):
-        for event in ("chest", "mimic", "fountain", "merchant", "empty"):
+        for event in ("chest", "mimic", "fountain", "merchant", "fairy", "mystery", "empty"):
             with self.subTest(event=event):
                 engine = GameEngine(random.Random(1))
                 player = Player(1, "管理员")
@@ -120,6 +122,28 @@ class EngineTests(unittest.TestCase):
                 engine.force_event(player, event)
 
                 self.assertIsNone(player.enemy)
+
+    def test_every_major_boss_has_a_unique_name(self):
+        engine = GameEngine(random.Random(1))
+        names = [engine._make_boss(floor).name for floor in range(10, 101, 10)]
+
+        self.assertEqual(len(names), 10)
+        self.assertEqual(len(set(names)), 10)
+
+    def test_bought_mana_and_energy_potions_can_be_used(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "顾客", gold=500, mp=1, energy=1)
+        engine._event_shop(player)
+        engine.buy_merchant_item(player, "mana_potion")
+        engine.buy_merchant_item(player, "energy_potion")
+
+        mana = engine.use_mana_potion(player)
+        energy = engine.use_energy_potion(player)
+
+        self.assertEqual(mana.title, "💧 使用魔力药水")
+        self.assertEqual(energy.title, "⚡ 使用精力药水")
+        self.assertEqual(player.mp, 26)
+        self.assertEqual(player.energy, 31)
 
 
 if __name__ == "__main__":
