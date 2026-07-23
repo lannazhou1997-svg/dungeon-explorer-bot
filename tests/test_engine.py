@@ -1,4 +1,3 @@
-
 import random
 import unittest
 
@@ -108,6 +107,22 @@ class EngineTests(unittest.TestCase):
         high_engine.attack(high)
 
         self.assertGreater(high_before - high.enemy.hp, low_before - low.enemy.hp)
+
+    def test_agility_reduces_random_event_damage(self):
+        low = Player(1, "笨重勇者", clothing_defense=1, clothing_agility=0)
+        high = Player(2, "灵巧勇者", clothing_defense=1, clothing_agility=10)
+
+        self.assertEqual(GameEngine.event_damage(low, 15), 15)
+        self.assertEqual(GameEngine.event_damage(high, 15), 10)
+
+    def test_luck_increases_real_chest_probability_with_a_cap(self):
+        normal = Player(1, "普通勇者")
+        lucky = Player(2, "幸运勇者", weapon_luck=10)
+        extremely_lucky = Player(3, "欧皇", weapon_luck=100)
+
+        self.assertEqual(GameEngine.chest_chance(normal), 0.625)
+        self.assertEqual(GameEngine.chest_chance(lucky), 0.775)
+        self.assertEqual(GameEngine.chest_chance(extremely_lucky), 0.90)
 
     def test_three_magic_skills_have_ordered_cost_and_damage(self):
         damages = []

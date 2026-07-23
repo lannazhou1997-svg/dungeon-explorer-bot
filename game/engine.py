@@ -50,6 +50,16 @@ class GameEngine:
         bonus = min(12, (floor - 1) // 10 * 2)
         return self.rng.randint(12 + bonus, 24 + bonus)
 
+    @staticmethod
+    def event_damage(player: Player, raw_damage: int) -> int:
+        """敏捷与防御共同减少探索事件造成的生命或魔力损失。"""
+        return max(1, raw_damage - player.agility // 2 - player.defense // 3)
+
+    @staticmethod
+    def chest_chance(player: Player) -> float:
+        """宝箱类事件成为真宝箱的概率：基础 62.5%，每点幸运 +1.5%。"""
+        return min(0.90, 0.625 + player.luck * 0.015)
+
     def ensure_floor(self, player: Player) -> None:
         if player.required_steps <= 0:
             player.required_steps = self.required_steps(player.floor)
@@ -88,7 +98,10 @@ class GameEngine:
             player.steps = 0
             player.required_steps = self.required_steps(player.floor)
             return GameResult("🚪 找到下层入口", f"第 **{cleared} 层**探索完成，没有 Boss 出现。你进入了第 **{player.floor} 层**。")
-        return getattr(self, f"_event_{self.rng.choice(self.EVENTS)}")(player)
+        event = self.rng.choice(self.EVENTS)
+        if event in {"chest", "mimic"}:
+            event = "chest" if self.rng.random() < self.chest_chance(player) else "mimic"
+        return getattr(self, f"_event_{event}")(player)
 
     def attack(
         self,
@@ -107,7 +120,8 @@ class GameEngine:
         base_min = 8 + player.level * 2
         base_max = 12 + player.level * 3
         base_damage = self.rng.randint(base_min, base_max)
-        exceptional = self.rng.random() < (0.08 if skill else 0.15)
+        exceptional_chance = (0.08 if skill else 0.15) + min(0.15, player.luck * 0.005)
+        exceptional = self.rng.random() < exceptional_chance
         if exceptional:
             base_damage = round(base_damage * 1.5)
         damage = base_damage + player.weapon_attack
@@ -121,6 +135,11 @@ class GameEngine:
         if enemy.hp == 0:
             reward_gold = self.rng.randint(6, 12) * max(1, player.floor)
             player.gold += reward_gold
+            bonus_drop = ""
+            if self.rng.random() < min(0.35, player.luck * 0.015):
+                item = self.rng.choice(("治疗药水", "魔力药水", "精力药水"))
+                player.consumables[item] = player.consumables.get(item, 0) + 1
+                bonus_drop = f"，幸运额外掉落 **{item} ×1**"
             exp = enemy.exp_reward
             player.enemy = None
             level_text = self._gain_exp(player, exp)
@@ -134,9 +153,17 @@ class GameEngine:
                 else:
                     progress = "\n你征服了地下城第 100 层！"
             return GameResult("🎉 战斗胜利", f"你以{label}造成 **{damage}** 点伤害{performance} {formula}，击败 **{enemy.name}**！"
-                              f"\n获得 {exp} 经验和 {reward_gold} 金币。{level_text}{progress}")
+                              f"\n获得 {exp} 经验和 {reward_gold} 金币{bonus_drop}。{level_text}{progress}")
         raw_incoming = self.rng.randint(max(1, enemy.attack - 3), enemy.attack + 3)
         incoming = max(1, raw_incoming - player.defense)
+        dodge_chance = min(0.35, player.agility * 0.015)
+        if self.rng.random() < dodge_chance:
+            return GameResult(
+                "💨 灵巧闪避！",
+                f"你以{label}造成 **{damage}** 点伤害{performance} {formula}；"
+                f"随后凭借 **{player.agility} 点敏捷**躲开了 {enemy.name} 的反击！",
+                True,
+            )
         player.hp = max(0, player.hp - incoming)
         if not player.is_alive:
             return self._die(player, f"你造成 {damage} 点伤害，但被 **{enemy.name}** 击败。")
@@ -208,7 +235,7 @@ class GameEngine:
             if outcome == "battle":
                 player.enemy = self._make_monster(player.floor)
                 return GameResult("👾 石像叫来了守卫！", f"**{player.enemy.name}** 从暗门里冲了出来！", True)
-            damage = 12 + player.floor // 2
+            damage = self.event_damage(player, 12 + player.floor // 2)
             player.hp = max(0, player.hp - damage)
             if not player.is_alive:
                 return self._die(player, f"神秘石像咬了你一口，造成 {damage} 点伤害。")
@@ -229,7 +256,7 @@ class GameEngine:
             player.pending_event = None
             roll = self.rng.random()
             if roll < 0.22:
-                damage = 8 + player.floor // 2
+                damage = self.event_damage(player, 8 + player.floor // 2)
                 player.hp = max(0, player.hp - damage)
                 if not player.is_alive:
                     return self._die(player, f"受困妖兽惊慌反咬，造成 {damage} 点伤害。")
@@ -443,7 +470,7 @@ class GameEngine:
 
     def _event_trap(self, player: Player) -> GameResult:
         raw_damage = self.rng.randint(5, 12) + player.floor // 3
-        damage = max(1, raw_damage - player.agility // 2 - player.defense // 3)
+        damage = self.event_damage(player, raw_damage)
         trap = self.rng.choice(("rock", "ambush", "rune", "thief", "snatcher"))
         if trap == "rock":
             player.hp = max(0, player.hp - damage)
