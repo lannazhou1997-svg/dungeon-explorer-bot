@@ -117,6 +117,17 @@ class GameEngine:
                 f"支付 **{price} 金币**，获得 **治疗药水 ×1**。\n"
                 "> “多谢惠顾！活着回来才能继续花钱哦。”",
             )
+        if event == "fountain":
+            hp = min(20 + player.floor // 2, player.max_hp - player.hp)
+            mp = min(12 + player.floor // 4, player.max_mp - player.mp)
+            energy = min(14, player.max_energy - player.energy)
+            player.hp += hp
+            player.mp += mp
+            player.energy += energy
+            return GameResult(
+                "⛲ 泉水回应了你！",
+                f"恢复 **{hp} 体力、{mp} 魔力、{energy} 精力**。",
+            )
         gold = self.rng.randint(8, 20) * max(1, player.floor)
         player.gold += gold
         extra = ""
@@ -212,13 +223,28 @@ class GameEngine:
 
     def _event_trap(self, player: Player) -> GameResult:
         damage = self.rng.randint(5, 12) + player.floor // 3
-        player.hp = max(0, player.hp - damage)
-        return self._die(player, f"你触发陷阱并受到 {damage} 点伤害。") if not player.is_alive else GameResult("🪤 你遇到了陷阱！", f"你受到 {damage} 点伤害。", True)
+        if self.rng.random() < 0.7:
+            player.hp = max(0, player.hp - damage)
+            if not player.is_alive:
+                return self._die(player, f"你触发尖刺陷阱并失去 {damage} 点体力。")
+            return GameResult(
+                "🪤 陷阱突然发动！",
+                f"尖刺从地面弹出，你直接失去 **{damage} 点体力**。",
+                True,
+            )
+        player.mp = max(0, player.mp - damage)
+        return GameResult(
+            "🔮 魔力陷阱发动！",
+            f"符文抽走了你的力量，你直接失去 **{damage} 点魔力**。",
+            True,
+        )
 
     def _event_recovery(self, player: Player) -> GameResult:
-        hp, mp, energy = min(20, player.max_hp-player.hp), min(12, player.max_mp-player.mp), min(10, player.max_energy-player.energy)
-        player.hp += hp; player.mp += mp; player.energy += energy
-        return GameResult("⛲ 你遇到了宁静泉水！", f"恢复体力 {hp}、魔力 {mp}、精力 {energy}。")
+        player.pending_event = "fountain"
+        return GameResult(
+            "⛲ 你遇到了宁静泉水！",
+            "清澈泉水散发着柔光。点击 **汲取泉水** 才能接受它的祝福。",
+        )
 
     def _event_shop(self, player: Player) -> GameResult:
         player.pending_event = "merchant"
@@ -231,3 +257,26 @@ class GameEngine:
 
     def _event_empty(self, player: Player) -> GameResult:
         return GameResult("🌙 你遇到了寂静长廊", "这里暂时没有危险，你安全地向前推进。")
+
+    def force_event(self, player: Player, event: str) -> GameResult:
+        """管理员测试入口：不消耗探索步数和精力，直接生成指定事件。"""
+        player.enemy = None
+        player.pending_event = None
+        if event == "small_boss":
+            floor = player.floor if player.floor % 5 else max(1, player.floor - 1)
+            player.enemy = self._make_boss(floor)
+            return GameResult("⚠️ 你遇到了守层者！", f"**{player.enemy.name}** 前来接受测试！", True)
+        if event == "major_boss":
+            floor = player.floor if player.floor % 5 == 0 else player.floor + (5 - player.floor % 5)
+            player.enemy = self._make_boss(floor)
+            return GameResult("🔥 你遇到了大 Boss！", f"**{player.enemy.name}** 前来接受测试！", True)
+        handlers = {
+            "monster": self._event_monster,
+            "chest": self._event_chest,
+            "mimic": self._event_mimic,
+            "trap": self._event_trap,
+            "fountain": self._event_recovery,
+            "merchant": self._event_shop,
+            "empty": self._event_empty,
+        }
+        return handlers[event](player)
