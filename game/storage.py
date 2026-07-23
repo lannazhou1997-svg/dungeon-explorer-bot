@@ -14,6 +14,9 @@ class PlayerStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS players (user_id INTEGER PRIMARY KEY, state TEXT NOT NULL)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -32,3 +35,18 @@ class PlayerStore:
         with self._connect() as conn:
             conn.execute("INSERT INTO players(user_id, state) VALUES(?, ?) "
                          "ON CONFLICT(user_id) DO UPDATE SET state = excluded.state", (player.user_id, payload))
+
+    def get_setting(self, key: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT setting_value FROM settings WHERE setting_key = ?", (key,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str | int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO settings(setting_key, setting_value) VALUES(?, ?) "
+                "ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+                (key, str(value)),
+            )
