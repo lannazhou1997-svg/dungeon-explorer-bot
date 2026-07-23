@@ -93,7 +93,7 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 @bot.event
 async def on_ready() -> None:
-    guild_id = os.getenv("GUILD_ID")
+    guild_id = os.getenv("TEST_GUILD_ID") or os.getenv("GUILD_ID")
     if guild_id:
         guild = discord.Object(id=int(guild_id))
         bot.tree.copy_global_to(guild=guild)
@@ -105,6 +105,14 @@ async def on_ready() -> None:
 
 @bot.tree.command(name="地下城", description="打开你的地下城探索面板")
 async def dungeon(interaction: discord.Interaction) -> None:
+    channel_id = os.getenv("DUNGEON_CHANNEL_ID")
+    if channel_id and interaction.channel_id != int(channel_id):
+        channel = bot.get_channel(int(channel_id))
+        mention = channel.mention if channel else f"频道 `{channel_id}`"
+        await interaction.response.send_message(
+            f"请前往 {mention} 使用地下城。", ephemeral=True
+        )
+        return
     player = store.get(interaction.user.id, interaction.user.display_name)
     engine.ensure_floor(player)
     store.save(player)
