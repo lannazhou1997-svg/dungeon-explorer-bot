@@ -13,6 +13,7 @@ class Enemy:
     attack: int
     exp_reward: int
     boss_kind: str = "普通怪物"
+    level: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -40,9 +41,11 @@ class Player:
     gold: int = 0
     crystals: int = 0
     weapon: str = "新手短剑"
+    weapon_attack: int = 4
     clothing: str = "布衣"
     consumables: dict[str, int] = field(default_factory=lambda: {"治疗药水": 2})
     enemy: Enemy | None = None
+    pending_event: str | None = None
 
     @property
     def exp_required(self) -> int:
