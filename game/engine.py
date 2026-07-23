@@ -12,12 +12,19 @@ class GameResult:
     title: str
     message: str
     danger: bool = False
+    death: bool = False
 
 
 class GameEngine:
     EVENTS = (["monster"] * 30 + ["chest"] * 15 + ["mimic"] * 9 +
               ["trap"] * 12 + ["recovery"] * 9 + ["shop"] * 7 +
-              ["fairy"] * 6 + ["mystery"] * 7 + ["empty"] * 12)
+              ["fairy"] * 5 + ["mystery"] * 6 + ["treasure_map"] * 5 +
+              ["trapped_beast"] * 5 + ["wishing_well"] * 4 + ["empty"] * 8)
+    MAGIC_SKILLS = {
+        "minor": ("✨ 星火弹", 6, 1.20),
+        "medium": ("🔷 月辉矢", 12, 1.50),
+        "major": ("🌠 奥术流星", 22, 1.85),
+    }
     MERCHANT_ITEMS = {
         "healing_potion": ("治疗药水", "恢复 35 点体力", 25),
         "mana_potion": ("魔力药水", "恢复 25 点魔力", 30),
@@ -35,6 +42,15 @@ class GameEngine:
     def ensure_floor(self, player: Player) -> None:
         if player.required_steps <= 0:
             player.required_steps = self.required_steps(player.floor)
+        if player.enemy and player.enemy.boss_kind == "大 Boss":
+            if player.floor % 10 != 0:
+                player.enemy = self._make_boss(player.floor)
+            else:
+                expected = self._make_boss(player.floor)
+                if player.enemy.name != expected.name:
+                    player.enemy.name = expected.name
+                    player.enemy.catchphrase = expected.catchphrase
+                    player.enemy.level = expected.level
 
     def explore(self, player: Player) -> GameResult:
         self.ensure_floor(player)
@@ -47,27 +63,45 @@ class GameEngine:
         player.energy -= 3
         player.steps += 1
         if player.steps >= player.required_steps:
-            player.enemy = self._make_boss(player.floor)
-            return GameResult("守层者出现！", f"你完成了本层探索，遭遇 **{player.enemy.name}**！", True)
+            position = player.floor % 10
+            if position == 0:
+                player.enemy = self._make_boss(player.floor)
+                return GameResult("🔥 大 Boss 降临！", f"固定守层者 **{player.enemy.name}** 挡住了通往下一区域的道路！", True)
+            if position in {5, 6, 7, 8} and self.rng.random() < 0.45:
+                player.enemy = self._make_boss(player.floor)
+                return GameResult("⚠️ 小 Boss 随机出现！", f"**{player.enemy.name}** 闻讯赶来，决定亲自阻止你！", True)
+            cleared = player.floor
+            player.floor += 1
+            player.steps = 0
+            player.required_steps = self.required_steps(player.floor)
+            return GameResult("🚪 找到下层入口", f"第 **{cleared} 层**探索完成，没有 Boss 出现。你进入了第 **{player.floor} 层**。")
         return getattr(self, f"_event_{self.rng.choice(self.EVENTS)}")(player)
 
-    def attack(self, player: Player, use_skill: bool = False) -> GameResult:
+    def attack(
+        self,
+        player: Player,
+        use_skill: bool = False,
+        skill_tier: str | None = None,
+    ) -> GameResult:
         enemy = player.enemy
         if not enemy:
             return GameResult("没有敌人", "当前没有可以攻击的目标。")
-        if use_skill and player.mp < 10:
-            return GameResult("魔力不足", "释放技能需要 10 点魔力。")
+        if use_skill and skill_tier is None:
+            skill_tier = "medium"
+        skill = self.MAGIC_SKILLS.get(skill_tier) if skill_tier else None
+        if skill and player.mp < skill[1]:
+            return GameResult("魔力不足", f"释放 **{skill[0]}** 需要 {skill[1]} 点魔力。")
         base_min = 8 + player.level * 2
         base_max = 12 + player.level * 3
         base_damage = self.rng.randint(base_min, base_max)
-        exceptional = self.rng.random() < 0.15
+        exceptional = self.rng.random() < (0.08 if skill else 0.15)
         if exceptional:
             base_damage = round(base_damage * 1.5)
         damage = base_damage + player.weapon_attack
-        label = "奥术斩击" if use_skill else "普通攻击"
-        if use_skill:
-            player.mp -= 10
-            damage = int(damage * 1.8)
+        label = skill[0] if skill else "普通攻击"
+        if skill:
+            player.mp -= skill[1]
+            damage = int(damage * skill[2])
         performance = "，触发 **超常发挥！**" if exceptional else ""
         formula = f"（基础 {base_damage} + 武器 {player.weapon_attack}）"
         enemy.hp = max(0, enemy.hp - damage)
@@ -165,6 +199,48 @@ class GameEngine:
             if not player.is_alive:
                 return self._die(player, f"神秘石像咬了你一口，造成 {damage} 点伤害。")
             return GameResult("💥 石像咬了你一口", f"失去 **{damage} 点体力**。谁让你乱摸呢？", True)
+        if event == "treasure_map":
+            player.pending_event = None
+            roll = self.rng.random()
+            if roll < 0.03:
+                player.crystals += 1
+                return GameResult("🔮 地图尽头的秘宝", "你找到了极其稀有的 **魔法水晶 ×1**！")
+            if roll < 0.28:
+                player.enemy = self._make_monster(player.floor, mimic=True)
+                return GameResult("😈 地图是宝箱怪的外卖单！", f"**{player.enemy.name}** 已经等候多时！", True)
+            gold = self.rng.randint(25, 55) * max(1, player.floor)
+            player.gold += gold
+            return GameResult("🗺️ 找到地图宝藏！", f"绕了一点远路，最终挖出 **{gold} 金币**。")
+        if event == "trapped_beast":
+            player.pending_event = None
+            roll = self.rng.random()
+            if roll < 0.22:
+                damage = 8 + player.floor // 2
+                player.hp = max(0, player.hp - damage)
+                if not player.is_alive:
+                    return self._die(player, f"受困妖兽惊慌反咬，造成 {damage} 点伤害。")
+                return GameResult("🐾 妖兽受惊了！", f"它误咬了你一口，失去 **{damage} 点体力**，随后逃进黑暗。", True)
+            if roll < 0.35:
+                player.enemy = self._make_monster(player.floor)
+                return GameResult("👾 捕兽夹的主人回来了！", f"**{player.enemy.name}** 把你当成了偷猎者！", True)
+            item = self.rng.choice(("治疗药水", "魔力药水", "精力药水"))
+            player.consumables[item] = player.consumables.get(item, 0) + 1
+            return GameResult("🐺 妖兽记住了你的气味", f"它叼来 **{item} ×1** 作为谢礼，然后摇着尾巴离开了。")
+        if event == "wishing_well":
+            player.pending_event = None
+            cost = 15 + player.floor * 2
+            if player.gold < cost:
+                return GameResult("🪙 愿望没有回音", f"许愿需要投入 **{cost} 金币**，你的钱袋不够沉。")
+            player.gold -= cost
+            roll = self.rng.random()
+            if roll < 0.12:
+                player.consumables["幸运护符"] = player.consumables.get("幸运护符", 0) + 1
+                return GameResult("🌟 愿望成真！", f"投入 {cost} 金币，井底浮出 **幸运护符 ×1**。")
+            if roll < 0.62:
+                exp = 25 + player.floor * 4
+                level_text = self._gain_exp(player, exp)
+                return GameResult("✨ 井水闪闪发光", f"投入 {cost} 金币，获得 **{exp} 经验**。{level_text}")
+            return GameResult("🐸 井里只有青蛙", f"投入 {cost} 金币，一只青蛙认真地对你说了声“呱”。")
         player.pending_event = None
         gold = self.rng.randint(8, 20) * max(1, player.floor)
         player.gold += gold
@@ -181,6 +257,12 @@ class GameEngine:
             return GameResult("👋 你婉拒了精灵", "精灵理解地点点头，留下几粒亮晶晶的粉末后飞走了。")
         if event == "mystery":
             return GameResult("🚶 你忍住了好奇心", "你没有乱摸来历不明的东西。今天也很稳健。")
+        if event == "treasure_map":
+            return GameResult("🗺️ 你收起了藏宝图", "这条岔路看起来不太可靠，你决定继续原本的路线。")
+        if event == "trapped_beast":
+            return GameResult("🐾 你没有靠近妖兽", "谨慎也许不够英雄，但通常比较长寿。")
+        if event == "wishing_well":
+            return GameResult("🪙 你保住了金币", "你没有向陌生的井投入辛苦赚来的钱。")
         if event == "merchant":
             return GameResult("🧳 离开旅行商店", "商人继续数着金币，目送你走远。")
         return GameResult("继续前进", "你没有与眼前的事物互动。")
@@ -252,14 +334,28 @@ class GameEngine:
         return f"\n提升了 {levels} 级，三项资源已恢复！" if levels else ""
 
     def _die(self, player: Player, prefix: str) -> GameResult:
+        available = [name for name, count in player.consumables.items() if count > 0]
+        lost: list[str] = []
+        if available:
+            kinds = self.rng.sample(available, k=min(len(available), self.rng.randint(1, 2)))
+            for name in kinds:
+                amount = self.rng.randint(1, min(2, player.consumables[name]))
+                player.consumables[name] -= amount
+                lost.append(f"{name} ×{amount}")
         player.level, player.exp = 1, 0
         player.max_hp, player.hp = 100, 100
         player.max_mp, player.mp = 50, 50
         player.max_energy, player.energy = 100, 100
         player.floor, player.steps = 1, 0
         player.required_steps = self.required_steps(1)
-        player.consumables, player.enemy, player.pending_event = {}, None, None
-        return GameResult("冒险失败", prefix + "\n等级、经验、层数和普通道具已重置；装备及剩余货币得以保留。", True)
+        player.enemy, player.pending_event = None, None
+        drop_text = "、".join(lost) if lost else "没有额外掉落道具"
+        return GameResult(
+            "💀 你死了",
+            f"{prefix}\n等级、经验和层数已重置；随机掉落：**{drop_text}**。装备及剩余货币保留。",
+            True,
+            True,
+        )
 
     def _make_monster(self, floor: int, mimic: bool = False) -> Enemy:
         scale = 1 + floor * 0.10
@@ -314,14 +410,7 @@ class GameEngine:
         ]
         zone = min(9, (floor - 1) // 10)
         name = major_names.get(floor, f"异界领主·第{floor}层") if major else self.rng.choice(zone_small_names[zone])
-        lines = {
-            "深渊领主": "凡人，报上名来——算了，墓碑上再写也一样。",
-            "噬魂魔像": "检测到入侵者。启动：非常用力地揍人。",
-            "猩红女王": "弄脏我的裙摆，你就留下来洗一百年吧。",
-            "守门石像": "口令错误。其实你说什么我都会判错。",
-            "地穴骑士": "剑可以生锈，骑士的架势绝不能垮。",
-            "腐化祭司": "安静！我刚把邪恶咒语背到最难的一段。",
-        }
+        lines: dict[str, str] = {}
         lines.setdefault(name, f"我是 **{name}**，这层的通行证可没那么好拿！")
         return Enemy(name, hp, hp, int((13 if major else 10) * scale),
                      80 + floor * (10 if major else 6), "大 Boss" if major else "小 Boss",
@@ -400,6 +489,28 @@ class GameEngine:
             "它看起来很想被摸一下。摸了以后可能恢复体力、掉落金币、受到伤害，甚至引来怪物。",
         )
 
+    def _event_treasure_map(self, player: Player) -> GameResult:
+        player.pending_event = "treasure_map"
+        return GameResult(
+            "🗺️ 你捡到了一张藏宝图！",
+            "地图指向一条偏离当前路线的岔路。前往后可能找到大量金币或稀有水晶，也可能是陷阱。",
+        )
+
+    def _event_trapped_beast(self, player: Player) -> GameResult:
+        player.pending_event = "trapped_beast"
+        return GameResult(
+            "🐺 你遇到了被困住的妖兽",
+            "它的脚被古老捕兽夹卡住了。解救它可能获得谢礼，但惊慌的妖兽也可能反咬或引来敌人。",
+        )
+
+    def _event_wishing_well(self, player: Player) -> GameResult:
+        player.pending_event = "wishing_well"
+        cost = 15 + player.floor * 2
+        return GameResult(
+            "🪙 你遇到了地下许愿井",
+            f"井壁写着模糊的古代符号。投入 **{cost} 金币**许愿，可能获得经验或幸运护符。",
+        )
+
     def _event_empty(self, player: Player) -> GameResult:
         return GameResult("🌙 你遇到了寂静长廊", "这里暂时没有危险，你安全地向前推进。")
 
@@ -424,6 +535,9 @@ class GameEngine:
             "merchant": self._event_shop,
             "fairy": self._event_fairy,
             "mystery": self._event_mystery,
+            "treasure_map": self._event_treasure_map,
+            "trapped_beast": self._event_trapped_beast,
+            "wishing_well": self._event_wishing_well,
             "empty": self._event_empty,
         }
         return handlers[event](player)
