@@ -1,9 +1,10 @@
-
 from __future__ import annotations
 
 import os
 import random
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 
 from game.engine import GameEngine, GameResult
 from game.models import Player
+from game.shop import RARITY_EMOJI, ShopItem, daily_stock, purchase
 from game.storage import PlayerStore
 
 load_dotenv()
@@ -19,12 +21,17 @@ TAVERN_IMAGE = Path(__file__).parent / "assets" / "adventurer-tavern-chibi-hq.jp
 CAVE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-chibi.jpg"
 CAVE_THUMBNAIL = Path(__file__).parent / "assets" / "youden-cave-square.jpg"
 FLOOR_SCENE_DIR = Path(__file__).parent / "assets" / "floors"
+GOLD_SHOP_IMAGE = Path(__file__).parent / "assets" / "gold-shop-banner.jpg"
 views_added = False
 
 
 def bar(value: int, maximum: int, width: int = 10) -> str:
     filled = round(width * value / maximum) if maximum else 0
     return "▰" * filled + "▱" * (width - filled)
+
+
+def today_key() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
 
 
 def floor_scene_filename(floor: int) -> str:
@@ -61,7 +68,11 @@ def inventory_embed(player: Player) -> discord.Embed:
     )
     embed.add_field(
         name="⚔️ 当前装备",
-        value=f"武器：**{player.weapon}**（攻击 +{player.weapon_attack}）\n服装：**{player.clothing}**",
+        value=(
+            f"武器：**{player.weapon}**（攻击 +{player.weapon_attack}）\n"
+            f"服装：**{player.clothing}**（防御 +{player.defense}）\n"
+            f"敏捷 **{player.agility}**｜幸运 **{player.luck}**"
+        ),
         inline=True,
     )
     embed.add_field(name="🎒 道具栏", value=items, inline=True)
@@ -124,6 +135,7 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
         f"## 🎒 行囊\n"
         f"🪙 **{player.gold}**　🔮 **{player.crystals}**　"
         f"⚔️ **{player.weapon} +{player.weapon_attack}**　👕 **{player.clothing}**\n"
+        f"🛡️ 防御 **{player.defense}**　💨 敏捷 **{player.agility}**　🍀 幸运 **{player.luck}**\n"
         f"🧪 治疗 **×{player.consumables.get('治疗药水', 0)}**　"
         f"💧 魔力 **×{player.consumables.get('魔力药水', 0)}**　"
         f"⚡ 精力 **×{player.consumables.get('精力药水', 0)}**\n"
@@ -187,6 +199,18 @@ class DungeonUtilities(discord.ui.ActionRow):
         )
 
 
+class ReturnTavernButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="返回冒险者酒馆", emoji="🍺", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        tavern_image = discord.File(TAVERN_IMAGE, filename="adventurer-tavern-chibi-hq.jpg")
+        await interaction.response.edit_message(
+            view=EntrancePanel(bot.user),
+            attachments=[tavern_image],
+        )
+
+
 class DungeonPanel(discord.ui.LayoutView):
     def __init__(self, owner_id: int, player: Player, result: GameResult | None = None):
         super().__init__(timeout=900)
@@ -209,7 +233,7 @@ class DungeonPanel(discord.ui.LayoutView):
             container.add_item(discord.ui.TextDisplay(result.message))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
-                DungeonActionButton("refresh", "重新从第一层出发", "🍺", discord.ButtonStyle.primary)
+                ReturnTavernButton()
             ))
             self.add_item(container)
             return
@@ -337,6 +361,7 @@ class CaveSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         player = store.get(interaction.user.id, interaction.user.display_name)
         engine.ensure_floor(player)
+        player.in_adventure = True
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
         await interaction.response.edit_message(
@@ -391,6 +416,117 @@ class ComingSoonButton(discord.ui.Button):
         )
 
 
+def gold_shop_products_text(stock: list[ShopItem]) -> str:
+    equipment = [item for item in stock if item.category in {"武器", "护具"}]
+    consumables = [item for item in stock if item.category == "道具"]
+
+    def line(item: ShopItem) -> str:
+        rarity = f"{RARITY_EMOJI[item.rarity]} **[{item.rarity}] {item.name}**"
+        return f"{rarity}\n> {item.stat_text}｜🪙 **{item.price}**"
+
+    return (
+        "## ⚔️ 今日装备\n"
+        + "\n".join(line(item) for item in equipment)
+        + "\n\n## 🧪 今日道具\n"
+        + "\n".join(line(item) for item in consumables)
+    )
+
+
+class GoldShopSelect(discord.ui.Select):
+    def __init__(self, stock: list[ShopItem]):
+        super().__init__(
+            placeholder="选择要购买的商品……",
+            options=[
+                discord.SelectOption(
+                    label=f"[{item.rarity}] {item.name}",
+                    value=item.key,
+                    description=f"{item.stat_text}｜{item.price} 金币",
+                    emoji=RARITY_EMOJI[item.rarity],
+                )
+                for item in stock
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        player = store.get(interaction.user.id, interaction.user.display_name)
+        stock = daily_stock(today_key())
+        item = next((entry for entry in stock if entry.key == self.values[0]), None)
+        if not item:
+            result = "商城已经跨日刷新，请重新打开金币商城。"
+        else:
+            _, result = purchase(player, item)
+            store.save(player)
+        await interaction.response.edit_message(
+            view=GoldShopPanel(interaction.user.id, player, result)
+        )
+
+
+class GoldShopPanel(discord.ui.LayoutView):
+    def __init__(self, owner_id: int, player: Player, result: str | None = None):
+        super().__init__(timeout=900)
+        self.owner_id = owner_id
+        stock = daily_stock(today_key())
+        container = discord.ui.Container(accent_colour=0xE0A12B)
+        container.add_item(discord.ui.Section(
+            "# 🪙 金币商城开张！",
+            "### 只收金币，不收眼泪；买完不退，哭也没用。\n——by **酒馆老板小小秦**",
+            accessory=discord.ui.Thumbnail(
+                bot.user.display_avatar.url,
+                description="地下城探索 Bot",
+            ),
+        ))
+        container.add_item(discord.ui.Separator())
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(
+            media="attachment://gold-shop-banner.jpg",
+            description="今日金币商城",
+        )
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+        result_text = f"\n\n> {result}" if result else ""
+        container.add_item(discord.ui.TextDisplay(
+            "## 📖 属性说明\n"
+            "**攻击**提高普通攻击与魔法伤害；**防御**减少战斗和陷阱伤害；"
+            "**敏捷**进一步降低陷阱伤害；**幸运**提高宝箱金币和额外道具概率。\n"
+            f"当前金币：🪙 **{player.gold}**｜今日日期：**{today_key()}**{result_text}"
+        ))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(gold_shop_products_text(stock)))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(GoldShopSelect(stock)))
+        container.add_item(discord.ui.ActionRow(ReturnTavernButton()))
+        self.add_item(container)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("这不是你的金币商城面板。", ephemeral=True)
+        return False
+
+
+class GoldShopButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="金币商店", emoji="🪙", style=discord.ButtonStyle.secondary,
+            custom_id="dungeon:coin_shop",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        player = store.get(interaction.user.id, interaction.user.display_name)
+        if player.is_adventuring:
+            await interaction.response.send_message(
+                "⚔️ 冒险途中无法使用金币商城。死亡并返回酒馆后才能再次购买。",
+                ephemeral=True,
+            )
+            return
+        shop_image = discord.File(GOLD_SHOP_IMAGE, filename="gold-shop-banner.jpg")
+        await interaction.response.send_message(
+            view=GoldShopPanel(interaction.user.id, player),
+            file=shop_image,
+            ephemeral=True,
+        )
+
+
 class MyStatusButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
@@ -409,7 +545,7 @@ class EntranceButtons(discord.ui.ActionRow):
     def __init__(self):
         super().__init__(
             ExploreEntranceButton(),
-            ComingSoonButton("金币商店", "🪙", "dungeon:coin_shop", "金币商店"),
+            GoldShopButton(),
             ComingSoonButton("水晶兑换", "🔮", "dungeon:crystal_shop", "水晶兑换"),
             MyStatusButton(),
         )
@@ -435,7 +571,8 @@ class EntrancePanel(discord.ui.LayoutView):
         )
         container.add_item(gallery)
         container.add_item(discord.ui.Separator())
-        quests = random.sample([
+        quest_rng = random.Random(f"dungeon-daily-quests:{today_key()}:v1")
+        quest_pool = [
             "🟢 **黏液灾害清扫令**｜击杀 35 只史莱姆，本日战斗经验 **+15%**",
             "🏰 **深入幽灯岩窟**｜单日向下推进 10 层，奖励 **金币 ×180**",
             "📦 **资深宝箱观察员**｜开启 12 个宝箱，奖励 **金币 ×160**",
@@ -444,11 +581,12 @@ class EntrancePanel(discord.ui.LayoutView):
             "🪙 **地下淘金者**｜单日获得 1,000 金币，额外奖励 **金币 ×120**",
             "🔮 **稀有水晶委托**｜击败 3 只大 Boss，奖励 **魔法水晶 ×1**",
             "💯 **百层远征记录**｜单次冒险抵达第 50 层，奖励 **魔法水晶 ×1**",
-        ], k=random.randint(2, 3))
+        ]
+        quests = quest_rng.sample(quest_pool, k=quest_rng.randint(2, 3))
         container.add_item(discord.ui.TextDisplay(
             "## 📜 今日冒险委托\n"
             + "\n".join(f"> {quest}" for quest in quests)
-            + "\n-# 委托内容会在酒馆面板刷新时随机更换；奖励结算将在任务系统阶段接入。"
+            + f"\n-# 委托按北京时间每日刷新｜{today_key()}｜奖励结算将在任务系统阶段接入。"
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(

@@ -42,10 +42,39 @@ class Player:
     crystals: int = 0
     weapon: str = "新手短剑"
     weapon_attack: int = 4
+    weapon_agility: int = 0
+    weapon_luck: int = 0
     clothing: str = "布衣"
+    clothing_defense: int = 1
+    clothing_agility: int = 0
+    clothing_luck: int = 0
     consumables: dict[str, int] = field(default_factory=lambda: {"治疗药水": 2})
     enemy: Enemy | None = None
     pending_event: str | None = None
+    in_adventure: bool = False
+
+    @property
+    def defense(self) -> int:
+        return self.clothing_defense
+
+    @property
+    def agility(self) -> int:
+        return self.weapon_agility + self.clothing_agility
+
+    @property
+    def luck(self) -> int:
+        return self.weapon_luck + self.clothing_luck
+
+    @property
+    def is_adventuring(self) -> bool:
+        """兼容旧存档：只要仍有探索进度或事件，就视为正在冒险。"""
+        return bool(
+            self.in_adventure
+            or self.floor > 1
+            or self.steps > 0
+            or self.enemy is not None
+            or self.pending_event is not None
+        )
 
     @property
     def exp_required(self) -> int:

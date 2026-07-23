@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import random
@@ -136,7 +135,8 @@ class GameEngine:
                     progress = "\n你征服了地下城第 100 层！"
             return GameResult("🎉 战斗胜利", f"你以{label}造成 **{damage}** 点伤害{performance} {formula}，击败 **{enemy.name}**！"
                               f"\n获得 {exp} 经验和 {reward_gold} 金币。{level_text}{progress}")
-        incoming = self.rng.randint(max(1, enemy.attack - 3), enemy.attack + 3)
+        raw_incoming = self.rng.randint(max(1, enemy.attack - 3), enemy.attack + 3)
+        incoming = max(1, raw_incoming - player.defense)
         player.hp = max(0, player.hp - incoming)
         if not player.is_alive:
             return self._die(player, f"你造成 {damage} 点伤害，但被 **{enemy.name}** 击败。")
@@ -257,9 +257,10 @@ class GameEngine:
             return GameResult("🐸 井里只有青蛙", f"投入 {cost} 金币，一只青蛙认真地对你说了声“呱”。")
         player.pending_event = None
         gold = self.rng.randint(8, 20) * max(1, player.floor)
+        gold = int(gold * (1 + min(0.5, player.luck * 0.03)))
         player.gold += gold
         extra = ""
-        if self.rng.random() < 0.25:
+        if self.rng.random() < min(0.65, 0.25 + player.luck * 0.02):
             player.consumables["治疗药水"] = player.consumables.get("治疗药水", 0) + 1
             extra = "，以及一瓶治疗药水"
         return GameResult("🎁 宝箱开启！", f"消耗 2 点精力，获得 **{gold} 金币**{extra}。")
@@ -365,7 +366,7 @@ class GameEngine:
         player.max_energy, player.energy = 100, 100
         player.floor, player.steps = 1, 0
         player.required_steps = self.required_steps(1)
-        player.enemy, player.pending_event = None, None
+        player.enemy, player.pending_event, player.in_adventure = None, None, False
         kept_text = "、".join(
             f"{name} ×{count}" for name, count in player.consumables.items()
         ) if player.consumables else "无"
@@ -441,7 +442,8 @@ class GameEngine:
         return GameResult("📦 你遇到了宝箱", "里面传来金币轻轻碰撞的声音。互动打开后，可能获得金币、药水或其他物品。")
 
     def _event_trap(self, player: Player) -> GameResult:
-        damage = self.rng.randint(5, 12) + player.floor // 3
+        raw_damage = self.rng.randint(5, 12) + player.floor // 3
+        damage = max(1, raw_damage - player.agility // 2 - player.defense // 3)
         trap = self.rng.choice(("rock", "ambush", "rune", "thief", "snatcher"))
         if trap == "rock":
             player.hp = max(0, player.hp - damage)
@@ -450,10 +452,11 @@ class GameEngine:
             return GameResult("🪨 你遇到了落石！", f"巨石从头顶滚落，失去 **{damage} 点体力**。", True)
         if trap == "ambush":
             player.enemy = self._make_monster(player.floor)
-            player.hp = max(0, player.hp - max(3, damage // 2))
+            ambush_damage = max(1, damage // 2)
+            player.hp = max(0, player.hp - ambush_damage)
             if not player.is_alive:
                 return self._die(player, "你遭到藏在暗处的怪物偷袭。")
-            return GameResult("⚔️ 你遭遇到了偷袭！", f"失去 **{max(3, damage // 2)} 点体力**，**{player.enemy.name}** 拦住了去路！", True)
+            return GameResult("⚔️ 你遭遇到了偷袭！", f"失去 **{ambush_damage} 点体力**，**{player.enemy.name}** 拦住了去路！", True)
         if trap == "rune":
             player.mp = max(0, player.mp - damage)
             return GameResult("🔮 魔力陷阱发动！", f"符文抽走力量，失去 **{damage} 点魔力**。", True)
