@@ -1,3 +1,4 @@
+
 import random
 import unittest
 
@@ -12,10 +13,11 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(12 <= early <= 24)
         self.assertTrue(24 <= deep <= 36)
 
-    def test_every_fifth_floor_is_major_boss(self):
+    def test_every_tenth_floor_is_major_boss(self):
         engine = GameEngine(random.Random(1))
         self.assertEqual(engine._make_boss(4).boss_kind, "小 Boss")
-        self.assertEqual(engine._make_boss(5).boss_kind, "大 Boss")
+        self.assertEqual(engine._make_boss(5).boss_kind, "小 Boss")
+        self.assertEqual(engine._make_boss(10).boss_kind, "大 Boss")
         self.assertEqual(engine._make_boss(100).boss_kind, "大 Boss")
 
     def test_death_keeps_equipment_and_currency_only(self):
@@ -108,6 +110,16 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result.title, "📦 你遇到了宝箱？")
         self.assertEqual(player.pending_event, "mimic")
         self.assertIsNone(player.enemy)
+
+    def test_admin_non_monster_events_never_create_an_enemy(self):
+        for event in ("chest", "mimic", "fountain", "merchant", "empty"):
+            with self.subTest(event=event):
+                engine = GameEngine(random.Random(1))
+                player = Player(1, "管理员")
+
+                engine.force_event(player, event)
+
+                self.assertIsNone(player.enemy)
 
 
 if __name__ == "__main__":
