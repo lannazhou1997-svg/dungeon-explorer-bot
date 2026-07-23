@@ -40,6 +40,37 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(player.steps, 0)
         self.assertIsNone(player.enemy)
 
+    def test_mimic_is_hidden_until_interaction(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "测试者")
+
+        result = engine._event_mimic(player)
+
+        self.assertEqual(result.title, "📦 发现宝箱？")
+        self.assertIsNone(player.enemy)
+        self.assertEqual(player.pending_event, "mimic")
+
+        reveal = engine.interact_event(player)
+
+        self.assertEqual(reveal.title, "😈 宝箱怪现身！")
+        self.assertIsNotNone(player.enemy)
+        self.assertEqual(player.enemy.boss_kind, "宝箱怪")
+        self.assertIsNone(player.pending_event)
+
+    def test_level_and_weapon_both_increase_damage(self):
+        low_engine = GameEngine(random.Random(10))
+        high_engine = GameEngine(random.Random(10))
+        low = Player(1, "新手", level=1, weapon_attack=4)
+        high = Player(2, "高手", level=10, weapon_attack=20)
+        low.enemy = Enemy("木桩", 9999, 9999, 1, 0)
+        high.enemy = Enemy("木桩", 9999, 9999, 1, 0)
+
+        low_before, high_before = low.enemy.hp, high.enemy.hp
+        low_engine.attack(low)
+        high_engine.attack(high)
+
+        self.assertGreater(high_before - high.enemy.hp, low_before - low.enemy.hp)
+
 
 if __name__ == "__main__":
     unittest.main()
