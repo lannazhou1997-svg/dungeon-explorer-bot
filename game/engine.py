@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import random
@@ -188,7 +189,7 @@ class GameEngine:
                      "宝箱怪" if mimic else "普通怪物", level, lines[name])
 
     def _make_boss(self, floor: int) -> Enemy:
-        major = floor % 5 == 0
+        major = floor % 10 == 0
         scale = 1 + floor * 0.12
         hp = int((115 if major else 78) * scale)
         names = ["深渊领主", "噬魂魔像", "猩红女王"] if major else ["守门石像", "地穴骑士", "腐化祭司"]
@@ -263,11 +264,11 @@ class GameEngine:
         player.enemy = None
         player.pending_event = None
         if event == "small_boss":
-            floor = player.floor if player.floor % 5 else max(1, player.floor - 1)
+            floor = player.floor if player.floor % 10 else max(1, player.floor - 1)
             player.enemy = self._make_boss(floor)
             return GameResult("⚠️ 你遇到了守层者！", f"**{player.enemy.name}** 前来接受测试！", True)
         if event == "major_boss":
-            floor = player.floor if player.floor % 5 == 0 else player.floor + (5 - player.floor % 5)
+            floor = player.floor if player.floor % 10 == 0 else player.floor + (10 - player.floor % 10)
             player.enemy = self._make_boss(floor)
             return GameResult("🔥 你遇到了大 Boss！", f"**{player.enemy.name}** 前来接受测试！", True)
         handlers = {
