@@ -16,6 +16,7 @@ load_dotenv()
 engine, store = GameEngine(), PlayerStore()
 TAVERN_IMAGE = Path(__file__).parent / "assets" / "adventurer-tavern-chibi-hq.jpg"
 CAVE_IMAGE = Path(__file__).parent / "assets" / "youden-cave-chibi.jpg"
+CAVE_THUMBNAIL = Path(__file__).parent / "assets" / "youden-cave-square.jpg"
 views_added = False
 
 
@@ -34,11 +35,27 @@ def player_embed(player: Player, result: GameResult | None = None) -> discord.Em
         description=f"# {title}\n{message}",
         color=color,
     )
+    embed.set_thumbnail(url="attachment://youden-cave-square.jpg")
     if player.enemy:
         enemy = player.enemy
         embed.add_field(
             name="━━━━━━━━━━　👾 敌影出现　━━━━━━━━━━",
             value=f"### {enemy.boss_kind}｜{enemy.name}\n> “{enemy.catchphrase}”",
+            inline=False,
+        )
+    else:
+        section = "🧭 探索记录"
+        if "宝箱" in title:
+            section = "📦 宝藏出现"
+        elif "泉水" in title:
+            section = "⛲ 奇遇出现"
+        elif "商人" in title or "交易" in title:
+            section = "🧳 商人出现"
+        elif "陷阱" in title:
+            section = "🪤 机关出现"
+        embed.add_field(
+            name=f"━━━━━━━━━━　{section}　━━━━━━━━━━",
+            value="\u200b",
             inline=False,
         )
         embed.add_field(
@@ -130,9 +147,25 @@ def inventory_embed(player: Player) -> discord.Embed:
 
 
 class DungeonView(discord.ui.View):
-    def __init__(self, owner_id: int):
+    def __init__(self, owner_id: int, player: Player):
         super().__init__(timeout=900)
         self.owner_id = owner_id
+        if not player.enemy:
+            self.remove_item(self.attack)
+            self.remove_item(self.skill)
+        else:
+            self.remove_item(self.explore)
+        if player.pending_event not in {"chest", "mimic", "fountain", "merchant"}:
+            self.remove_item(self.interact)
+        elif player.pending_event in {"chest", "mimic"}:
+            self.interact.label = "打开宝箱"
+            self.interact.emoji = "📦"
+        elif player.pending_event == "fountain":
+            self.interact.label = "汲取泉水"
+            self.interact.emoji = "⛲"
+        else:
+            self.interact.label = "与商人交易"
+            self.interact.emoji = "🤝"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
@@ -144,7 +177,10 @@ class DungeonView(discord.ui.View):
         player = store.get(interaction.user.id, interaction.user.display_name)
         result = getattr(engine, action)(player)
         store.save(player)
-        await interaction.response.edit_message(embed=player_embed(player, result), view=self)
+        await interaction.response.edit_message(
+            embed=player_embed(player, result),
+            view=DungeonView(self.owner_id, player),
+        )
 
     @discord.ui.button(label="继续探索", emoji="👣", style=discord.ButtonStyle.primary)
     async def explore(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -159,7 +195,10 @@ class DungeonView(discord.ui.View):
         player = store.get(interaction.user.id, interaction.user.display_name)
         result = engine.attack(player, use_skill=True)
         store.save(player)
-        await interaction.response.edit_message(embed=player_embed(player, result), view=self)
+        await interaction.response.edit_message(
+            embed=player_embed(player, result),
+            view=DungeonView(self.owner_id, player),
+        )
 
     @discord.ui.button(label="治疗药水", emoji="🧪", style=discord.ButtonStyle.success)
     async def potion(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -170,7 +209,10 @@ class DungeonView(discord.ui.View):
         player = store.get(interaction.user.id, interaction.user.display_name)
         engine.ensure_floor(player)
         store.save(player)
-        await interaction.response.edit_message(embed=player_embed(player), view=self)
+        await interaction.response.edit_message(
+            embed=player_embed(player),
+            view=DungeonView(self.owner_id, player),
+        )
 
     @discord.ui.button(label="互动／交易", emoji="🤝", style=discord.ButtonStyle.success, row=1)
     async def interact(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -197,10 +239,11 @@ class CaveSelect(discord.ui.Select):
         engine.ensure_floor(player)
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
+        thumbnail = discord.File(CAVE_THUMBNAIL, filename="youden-cave-square.jpg")
         await interaction.response.edit_message(
             embed=player_embed(player, result),
-            view=DungeonView(interaction.user.id),
-            attachments=[],
+            view=DungeonView(interaction.user.id, player),
+            attachments=[thumbnail],
         )
 
 
@@ -293,12 +336,14 @@ class EntrancePanel(discord.ui.LayoutView):
         container.add_item(gallery)
         container.add_item(discord.ui.Separator())
         quests = random.sample([
-            "🟢 **史莱姆清扫令**｜击杀 20 只史莱姆，本日战斗经验 **+20%**",
-            "🏰 **向更深处进发**｜今日抵达第 5 层，奖励 **魔法水晶 ×3**",
-            "📦 **宝箱观察员**｜开启 5 个宝箱，奖励 **金币 ×120**",
-            "👾 **守层者讨伐**｜击败 2 只小 Boss，奖励 **经验 ×80**",
-            "🧪 **勤俭冒险家**｜不使用药水完成 8 次探索，奖励 **魔法水晶 ×2**",
-            "🪙 **地下拾荒者**｜本日获得 300 金币，额外奖励 **金币 ×60**",
+            "🟢 **黏液灾害清扫令**｜击杀 35 只史莱姆，本日战斗经验 **+15%**",
+            "🏰 **深入幽灯岩窟**｜单日向下推进 10 层，奖励 **金币 ×180**",
+            "📦 **资深宝箱观察员**｜开启 12 个宝箱，奖励 **金币 ×160**",
+            "👾 **守层者连战**｜击败 5 只小 Boss，奖励 **经验 ×150**",
+            "🧪 **无伤补给挑战**｜不使用药水完成 20 次探索，奖励 **金币 ×200**",
+            "🪙 **地下淘金者**｜单日获得 1,000 金币，额外奖励 **金币 ×120**",
+            "🔮 **稀有水晶委托**｜击败 3 只大 Boss，奖励 **魔法水晶 ×1**",
+            "💯 **百层远征记录**｜单次冒险抵达第 50 层，奖励 **魔法水晶 ×1**",
         ], k=random.randint(2, 3))
         container.add_item(discord.ui.TextDisplay(
             "## 📜 今日冒险委托\n"
@@ -373,6 +418,41 @@ async def dungeon(interaction: discord.Interaction) -> None:
         return
     await interaction.response.send_message(
         "请选择要进入的洞窟：", view=CaveSelectionView(), ephemeral=True
+    )
+
+
+@bot.tree.command(name="地下城测试", description="管理员指定下一刻出现的地下城事件")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.choices(event=[
+    discord.app_commands.Choice(name="普通怪物", value="monster"),
+    discord.app_commands.Choice(name="普通宝箱", value="chest"),
+    discord.app_commands.Choice(name="宝箱怪（先伪装）", value="mimic"),
+    discord.app_commands.Choice(name="宁静泉水", value="fountain"),
+    discord.app_commands.Choice(name="旅行商人", value="merchant"),
+    discord.app_commands.Choice(name="随机陷阱", value="trap"),
+    discord.app_commands.Choice(name="寂静长廊", value="empty"),
+    discord.app_commands.Choice(name="小 Boss", value="small_boss"),
+    discord.app_commands.Choice(name="大 Boss", value="major_boss"),
+])
+async def dungeon_test(
+    interaction: discord.Interaction,
+    event: discord.app_commands.Choice[str],
+) -> None:
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if not permissions or not permissions.administrator:
+        await interaction.response.send_message("只有服务器管理员可以使用测试指令。", ephemeral=True)
+        return
+    player = store.get(interaction.user.id, interaction.user.display_name)
+    engine.ensure_floor(player)
+    result = engine.force_event(player, event.value)
+    store.save(player)
+    thumbnail = discord.File(CAVE_THUMBNAIL, filename="youden-cave-square.jpg")
+    await interaction.response.send_message(
+        content=f"🛠️ 管理员测试事件：**{event.name}**",
+        embed=player_embed(player, result),
+        view=DungeonView(interaction.user.id, player),
+        file=thumbnail,
+        ephemeral=True,
     )
 
 
