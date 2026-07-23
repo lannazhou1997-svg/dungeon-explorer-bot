@@ -488,7 +488,9 @@ class GoldShopPanel(discord.ui.LayoutView):
             "## 📖 属性说明\n"
             "**攻击**提高普通攻击与魔法伤害；**防御**减少战斗和陷阱伤害；"
             "**敏捷**进一步降低陷阱伤害；**幸运**提高宝箱金币和额外道具概率。\n"
-            f"当前金币：🪙 **{player.gold}**｜今日日期：**{today_key()}**{result_text}"
+            f"当前金币：🪙 **{player.gold}**｜今日日期：**{today_key()}**\n"
+            "可连续选择商品购买；全部买完后，再点击下方的 **返回酒馆**。"
+            f"{result_text}"
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(gold_shop_products_text(stock)))
@@ -692,6 +694,23 @@ async def dungeon_test(
     await interaction.response.send_message(
         view=DungeonPanel(interaction.user.id, player, result),
         file=floor_scene_file(player.floor),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="金币测试", description="管理员领取 20,000 测试金币")
+@discord.app_commands.default_permissions(administrator=True)
+async def gold_test(interaction: discord.Interaction) -> None:
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if not permissions or not permissions.administrator:
+        await interaction.response.send_message("只有服务器管理员可以使用测试指令。", ephemeral=True)
+        return
+    player = store.get(interaction.user.id, interaction.user.display_name)
+    player.gold += 20_000
+    store.save(player)
+    await interaction.response.send_message(
+        "🧪 已发放 **20,000 测试金币**！\n"
+        f"你现在共有 🪙 **{player.gold}** 金币。返回冒险者酒馆后即可打开金币商城测试装备。",
         ephemeral=True,
     )
 

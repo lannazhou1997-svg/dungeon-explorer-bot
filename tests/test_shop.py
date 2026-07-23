@@ -44,6 +44,7 @@ class GoldShopTests(unittest.TestCase):
         purchase(player, item)
 
         self.assertEqual(player.consumables[item.name], 2)
+        self.assertEqual(player.gold, 10_000 - item.price * 2)
 
     def test_shop_is_blocked_during_an_adventure(self):
         states = [
