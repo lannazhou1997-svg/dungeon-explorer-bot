@@ -25,6 +25,18 @@ class GameEngine:
         "medium": ("🔷 月辉矢", 12, 1.50),
         "major": ("🌠 奥术流星", 22, 1.85),
     }
+    MAJOR_BOSS_NAMES = {
+        10: "黏液大公·噗叽伯爵",
+        20: "晶甲女王·辉钻",
+        30: "万菌之母·绵绵菇",
+        40: "潮汐圣兽·波波鲁",
+        50: "熔炉总管·赤锤",
+        60: "禁书馆长·墨菲斯",
+        70: "永动机皇·咔嗒三世",
+        80: "极星冰帝·企鹅诺尔",
+        90: "月庭守护者·露娜兔",
+        100: "幽灯王座·小小暗王",
+    }
     MERCHANT_ITEMS = {
         "healing_potion": ("治疗药水", "恢复 35 点体力", 25),
         "mana_potion": ("魔力药水", "恢复 25 点魔力", 30),
@@ -43,6 +55,8 @@ class GameEngine:
         if player.required_steps <= 0:
             player.required_steps = self.required_steps(player.floor)
         if player.enemy and player.enemy.boss_kind == "大 Boss":
+            if player.enemy.name in self.MAJOR_BOSS_NAMES.values():
+                return
             if player.floor % 10 != 0:
                 player.enemy = self._make_boss(player.floor)
             else:
@@ -334,14 +348,17 @@ class GameEngine:
         return f"\n提升了 {levels} 级，三项资源已恢复！" if levels else ""
 
     def _die(self, player: Player, prefix: str) -> GameResult:
-        available = [name for name, count in player.consumables.items() if count > 0]
-        lost: list[str] = []
-        if available:
-            kinds = self.rng.sample(available, k=min(len(available), self.rng.randint(1, 2)))
-            for name in kinds:
-                amount = self.rng.randint(1, min(2, player.consumables[name]))
-                player.consumables[name] -= amount
-                lost.append(f"{name} ×{amount}")
+        item_pool = [
+            name
+            for name, count in player.consumables.items()
+            for _ in range(max(0, count))
+        ]
+        kept_items = self.rng.sample(item_pool, k=min(2, len(item_pool)))
+        player.consumables = {}
+        for name in kept_items:
+            player.consumables[name] = player.consumables.get(name, 0) + 1
+        original_gold = player.gold
+        player.gold //= 2
         player.level, player.exp = 1, 0
         player.max_hp, player.hp = 100, 100
         player.max_mp, player.mp = 50, 50
@@ -349,10 +366,13 @@ class GameEngine:
         player.floor, player.steps = 1, 0
         player.required_steps = self.required_steps(1)
         player.enemy, player.pending_event = None, None
-        drop_text = "、".join(lost) if lost else "没有额外掉落道具"
+        kept_text = "、".join(
+            f"{name} ×{count}" for name, count in player.consumables.items()
+        ) if player.consumables else "无"
         return GameResult(
             "💀 你死了",
-            f"{prefix}\n等级、经验和层数已重置；随机掉落：**{drop_text}**。装备及剩余货币保留。",
+            f"{prefix}\n等级、经验和层数已重置；普通道具只保留：**{kept_text}**。"
+            f"金币由 **{original_gold}** 减少为 **{player.gold}**；装备和魔法水晶保留。",
             True,
             True,
         )
@@ -389,18 +409,6 @@ class GameEngine:
         major = floor % 10 == 0
         scale = 1 + floor * 0.12
         hp = int((115 if major else 78) * scale)
-        major_names = {
-            10: "黏液大公·噗叽伯爵",
-            20: "晶甲女王·辉钻",
-            30: "万菌之母·绵绵菇",
-            40: "潮汐圣兽·波波鲁",
-            50: "熔炉总管·赤锤",
-            60: "禁书馆长·墨菲斯",
-            70: "永动机皇·咔嗒三世",
-            80: "极星冰帝·企鹅诺尔",
-            90: "月庭守护者·露娜兔",
-            100: "幽灯王座·小小暗王",
-        }
         zone_small_names = [
             ["提灯石像", "苔冠骑士"], ["晶矿监督", "宝石巨钳"],
             ["菌环祭司", "孢子巨人"], ["水殿门卫", "泡沫骑士"],
@@ -409,7 +417,7 @@ class GameEngine:
             ["星庭园丁", "月花守卫"], ["王座近卫", "月晶执事"],
         ]
         zone = min(9, (floor - 1) // 10)
-        name = major_names.get(floor, f"异界领主·第{floor}层") if major else self.rng.choice(zone_small_names[zone])
+        name = self.MAJOR_BOSS_NAMES.get(floor, f"异界领主·第{floor}层") if major else self.rng.choice(zone_small_names[zone])
         lines: dict[str, str] = {}
         lines.setdefault(name, f"我是 **{name}**，这层的通行证可没那么好拿！")
         return Enemy(name, hp, hp, int((13 if major else 10) * scale),
