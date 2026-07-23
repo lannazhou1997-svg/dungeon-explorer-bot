@@ -82,6 +82,33 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(player.consumables["治疗药水"], 3)
         self.assertIsNone(player.pending_event)
 
+    def test_fountain_waits_for_interaction(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "冒险者", hp=40, mp=10, energy=50)
+
+        found = engine._event_recovery(player)
+
+        self.assertEqual(found.title, "⛲ 你遇到了宁静泉水！")
+        self.assertEqual((player.hp, player.mp, player.energy), (40, 10, 50))
+        self.assertEqual(player.pending_event, "fountain")
+
+        engine.interact_event(player)
+
+        self.assertGreater(player.hp, 40)
+        self.assertGreater(player.mp, 10)
+        self.assertGreater(player.energy, 48)
+        self.assertIsNone(player.pending_event)
+
+    def test_admin_can_force_a_hidden_mimic(self):
+        engine = GameEngine(random.Random(1))
+        player = Player(1, "管理员")
+
+        result = engine.force_event(player, "mimic")
+
+        self.assertEqual(result.title, "📦 你遇到了宝箱？")
+        self.assertEqual(player.pending_event, "mimic")
+        self.assertIsNone(player.enemy)
+
 
 if __name__ == "__main__":
     unittest.main()
