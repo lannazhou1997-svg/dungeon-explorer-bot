@@ -22,6 +22,27 @@
 
 如果填写了 `TEST_GUILD_ID`，指令会优先同步到该测试服务器，通常几秒内可见；不填写则注册为全局指令。填写 `DUNGEON_CHANNEL_ID` 后，地下城指令只能在指定文字频道使用。
 
+## 在 GitHub Codespaces 运行
+
+1. 在仓库页面点击 **Code → Codespaces → Create codespace on main**。
+2. 在 Codespaces 终端执行：
+
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
+
+3. 在 `.env` 中填写 Bot Token、测试服务器 ID 和地下城频道 ID，保存后执行：
+
+   ```bash
+   pip install -r requirements.txt
+   python bot.py
+   ```
+
+4. 看到 `已登录：机器人名称` 后，前往指定 Discord 频道输入 `/地下城`。
+
+`.env` 已被 Git 忽略，不要将 Token 提交到仓库。Codespace 终端需要保持运行；停止 Codespace 后 Bot 会离线。
+
 ## 当前版本说明
 
 商店和装备宝箱已作为事件入口展示，购买与装备抽取会在下一阶段接入。项目使用独立 SQLite 数据库，不会读取或修改现有签到 Bot。
