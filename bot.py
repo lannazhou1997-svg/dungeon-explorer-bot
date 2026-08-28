@@ -1030,14 +1030,11 @@ class CaveSelect(discord.ui.Select):
         player.gold_storage_available = False
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
-        try:
-            await interaction.delete_original_response()
-        except (discord.NotFound, discord.HTTPException):
-            pass
-        await interaction.followup.send(
+        await interaction.edit_original_response(
+            content=None,
+            embed=None,
             view=DungeonPanel(interaction.user.id, player, result),
-            file=floor_scene_file(player.floor),
-            ephemeral=True,
+            attachments=[floor_scene_file(player.floor)],
         )
         if isinstance(interaction.user, discord.Member):
             await assign_dungeon_adventurer_role(interaction.user)
