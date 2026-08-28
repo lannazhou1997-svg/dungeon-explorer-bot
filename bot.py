@@ -1022,6 +1022,7 @@ class CaveSelect(discord.ui.Select):
         if self.values[0] == "endless_school":
             await school_runtime.enter_school(interaction)
             return
+        await interaction.response.defer()
         player = store.get(interaction.user.id, interaction.user.display_name)
         sync_player_fortune(player, interaction.guild_id)
         engine.ensure_floor(player)
@@ -1029,11 +1030,14 @@ class CaveSelect(discord.ui.Select):
         player.gold_storage_available = False
         store.save(player)
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
-        await interaction.response.edit_message(
-            content=None,
-            embed=None,
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
+        await interaction.followup.send(
             view=DungeonPanel(interaction.user.id, player, result),
-            attachments=[floor_scene_file(player.floor)],
+            file=floor_scene_file(player.floor),
+            ephemeral=True,
         )
         if isinstance(interaction.user, discord.Member):
             await assign_dungeon_adventurer_role(interaction.user)

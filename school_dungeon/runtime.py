@@ -1878,6 +1878,7 @@ def host_entrance_panel() -> discord.ui.LayoutView:
 
 async def enter_school(interaction: discord.Interaction) -> None:
     """从共享酒馆选择页进入地下城二，并使用独立学园存档。"""
+    await interaction.response.defer()
     player = store.get(interaction.user.id, interaction.user.display_name)
     sync_player_fortune(player, interaction.guild_id)
     engine.ensure_floor(player)
@@ -1888,11 +1889,14 @@ async def enter_school(interaction: discord.Interaction) -> None:
         "🏫 永不下课的学园",
         "你推开封闭的校门，教学楼里传来本不该响起的上课铃……",
     )
-    await interaction.response.edit_message(
-        content=None,
-        embed=None,
+    try:
+        await interaction.delete_original_response()
+    except (discord.NotFound, discord.HTTPException):
+        pass
+    await interaction.followup.send(
         view=DungeonPanel(interaction.user.id, player, result),
-        attachments=[floor_scene_file(player.floor)],
+        file=floor_scene_file(player.floor),
+        ephemeral=True,
     )
     if isinstance(interaction.user, discord.Member):
         await assign_dungeon_adventurer_role(interaction.user)
