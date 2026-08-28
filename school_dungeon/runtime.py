@@ -609,7 +609,10 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
 
 class DungeonActionButton(discord.ui.Button):
     def __init__(self, action: str, label: str, emoji: str, style: discord.ButtonStyle):
-        super().__init__(label=label, emoji=emoji, style=style)
+        super().__init__(
+            label=label, emoji=emoji, style=style,
+            custom_id=f"school_dungeon:action:{action}",
+        )
         self.action = action
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -653,22 +656,25 @@ class DungeonActions(discord.ui.ActionRow):
         if player.pending_event in pending_buttons:
             action, label, emoji = pending_buttons[player.pending_event]
             buttons.append(DungeonActionButton(action, label, emoji, discord.ButtonStyle.success))
-        if player.pending_event in {
-            "chest", "mimic", "merchant", "fairy", "mystery",
-            "treasure_map", "trapped_beast", "wishing_well",
-        }:
-            leave_label = (
-                "不打开，悄悄离开"
-                if player.pending_event in {"chest", "mimic"}
-                else "婉拒／离开"
-            )
-            buttons.append(DungeonActionButton(
-                "decline_event",
-                leave_label,
-                "🚶",
-                discord.ButtonStyle.secondary,
-            ))
         super().__init__(*buttons[:5])
+
+
+DECLINABLE_EVENTS = {
+    "chest", "mimic", "merchant", "fairy", "mystery",
+    "treasure_map", "trapped_beast", "wishing_well",
+}
+
+
+class DungeonDeclineActions(discord.ui.ActionRow):
+    def __init__(self, player: Player):
+        leave_label = (
+            "不打开，悄悄离开"
+            if player.pending_event in {"chest", "mimic"}
+            else "婉拒／离开"
+        )
+        super().__init__(DungeonActionButton(
+            "decline_event", leave_label, "🚶", discord.ButtonStyle.secondary,
+        ))
 
 
 class DungeonUtilities(discord.ui.ActionRow):
@@ -831,6 +837,8 @@ class DungeonPanel(discord.ui.LayoutView):
         container.add_item(discord.ui.Separator())
         container.add_item(DungeonActions(player))
         if not player.pending_quiz:
+            if player.pending_event in DECLINABLE_EVENTS:
+                container.add_item(DungeonDeclineActions(player))
             container.add_item(DungeonUtilities(player))
             container.add_item(DungeonQuestUtilities())
         self.add_item(container)
