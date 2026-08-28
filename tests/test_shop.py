@@ -1,13 +1,18 @@
 import unittest
 
 from game.models import Enemy, Player
-from game.shop import ARMORS, CONSUMABLES, WEAPONS, daily_stock, purchase
+import random
+
+from game.shop import ARMORS, CONSUMABLES, WEAPONS, boss_equipment_drop, daily_stock, purchase
 
 
 class GoldShopTests(unittest.TestCase):
     def test_stock_is_stable_for_the_same_day(self):
         self.assertEqual(daily_stock("2026-07-23"), daily_stock("2026-07-23"))
-        self.assertEqual(len(daily_stock("2026-07-23")), 10)
+        self.assertEqual(len(daily_stock("2026-07-23")), 12)
+
+    def test_consecutive_days_have_different_stock(self):
+        self.assertNotEqual(daily_stock("2026-07-23"), daily_stock("2026-07-24"))
 
     def test_stock_contains_equipment_and_consumables(self):
         categories = {item.category for item in daily_stock("2026-07-23")}
@@ -63,6 +68,21 @@ class GoldShopTests(unittest.TestCase):
         player = Player(1, "归来的勇者", gold=10_000)
         ok, _ = purchase(player, CONSUMABLES[0])
         self.assertTrue(ok)
+
+    def test_boss_drop_rarity_is_limited_by_floor(self):
+        low = {boss_equipment_drop(10, random.Random(seed)).rarity for seed in range(30)}
+        deep = {boss_equipment_drop(100, random.Random(seed)).rarity for seed in range(30)}
+
+        self.assertTrue(low <= {"普通", "优良"})
+        self.assertTrue(deep <= {"稀有", "黄金", "传说"})
+
+    def test_deep_boss_legendary_is_about_three_percent_after_drop(self):
+        rng = random.Random(77)
+        rewards = [boss_equipment_drop(100, rng) for _ in range(10_000)]
+        legendary_rate = sum(item.rarity == "传说" for item in rewards) / len(rewards)
+
+        self.assertGreater(legendary_rate, 0.02)
+        self.assertLess(legendary_rate, 0.04)
 
 
 if __name__ == "__main__":
