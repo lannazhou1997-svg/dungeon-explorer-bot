@@ -48,3 +48,21 @@ def test_dungeon_two_mobile_event_actions_use_separate_rows(
     assert [button.label for button in primary_row.children] == [expected_label]
     assert [button.label for button in decline_row.children] == ["婉拒／离开"]
     assert primary_row.children[0].custom_id != decline_row.children[0].custom_id
+
+
+def test_dungeon_one_adventure_panel_does_not_repeat_daily_quests() -> None:
+    player = DungeonOnePlayer(1, "手机测试", pending_event="merchant")
+
+    panel = dungeon_one.DungeonPanel(1, player, None)
+    row_types = {type(item).__name__ for item in panel.children[0].children}
+
+    assert "DungeonQuestUtilities" not in row_types
+
+
+def test_dungeon_two_adventure_panel_does_not_repeat_daily_quests() -> None:
+    player = DungeonTwoPlayer(1, "手机测试", pending_event="merchant")
+
+    panel = dungeon_two.DungeonPanel(1, player, None)
+    row_types = {type(item).__name__ for item in panel.children[0].children}
+
+    assert "DungeonQuestUtilities" not in row_types

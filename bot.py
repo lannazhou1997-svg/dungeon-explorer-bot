@@ -809,7 +809,6 @@ class DungeonPanel(discord.ui.LayoutView):
         if player.pending_event in DECLINABLE_EVENTS:
             container.add_item(DungeonDeclineActions(player))
         container.add_item(DungeonUtilities(player))
-        container.add_item(DungeonQuestUtilities())
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
