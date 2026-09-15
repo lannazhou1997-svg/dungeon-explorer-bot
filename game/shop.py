@@ -85,7 +85,7 @@ CONSUMABLES = [
 
 
 def daily_stock(date_key: str) -> list[ShopItem]:
-    rng = random.Random(f"dungeon-gold-shop:{date_key}:v2-expanded")
+    rng = random.Random(f"dungeon-one-gold-shop:{date_key}:v3-independent")
     return rng.sample(WEAPONS, 4) + rng.sample(ARMORS, 4) + rng.sample(CONSUMABLES, 4)
 
 

@@ -7,12 +7,19 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from .equipment import migrate_equipment_names
+from .crystal import migrate_crystal_reward_names
 from .models import Player
 
 
 class PlayerStore:
-    def __init__(self, path: str | Path = "data/dungeon.db"):
+    def __init__(
+        self,
+        path: str | Path = "data/dungeon.db",
+        shared_path: str | Path | None = None,
+    ):
         self.path = Path(path)
+        self.shared_path = Path(shared_path) if shared_path else self.path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn:
             conn.execute(
@@ -42,10 +49,31 @@ class PlayerStore:
                 "PRIMARY KEY (week_key, user_id))"
             )
             conn.commit()
+        self.set_shared_path(self.shared_path)
         self._migrate_player_states()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10)
+
+    def _connect_shared(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.shared_path, timeout=10)
+
+    def set_shared_path(self, path: str | Path) -> None:
+        """只把金币与魔法水晶钱包指向地下城一；角色装备保持独立。"""
+        self.shared_path = Path(path)
+        self.shared_path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(self._connect_shared()) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS players "
+                "(user_id INTEGER PRIMARY KEY, state TEXT NOT NULL)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS shared_wallets ("
+                "user_id INTEGER PRIMARY KEY, "
+                "gold INTEGER NOT NULL DEFAULT 0, "
+                "crystals INTEGER NOT NULL DEFAULT 0)"
+            )
+            conn.commit()
 
     def _migrate_player_states(self) -> None:
         """启动时把全部旧玩家状态迁移并永久写回，而不是等待逐个登录。"""
@@ -59,9 +87,14 @@ class PlayerStore:
                         int(state.get("merchant_charm_rules_version", 0)) >= 6
                         and int(state.get("tavern_storage_rules_version", 0)) >= 1
                         and int(state.get("crystal_charm_archive_version", 0)) >= 1
+                        and int(state.get("equipment_name_rules_version", 0)) >= 2
+                        and int(state.get("school_supply_name_rules_version", 0)) >= 1
+                        and int(state.get("crystal_pool_name_rules_version", 0)) >= 1
                     ):
                         continue
                     migrated = Player.from_dict(state)
+                    migrate_equipment_names(migrated)
+                    migrate_crystal_reward_names(migrated)
                 except (TypeError, ValueError, json.JSONDecodeError):
                     continue
                 conn.execute(
@@ -82,6 +115,7 @@ class PlayerStore:
                 Player.from_dict(json.loads(row[0]))
                 if row else Player(user_id=user_id, name=name)
             )
+        with closing(self._connect_shared()) as conn:
             wallet = conn.execute(
                 "SELECT gold, crystals FROM shared_wallets WHERE user_id = ?",
                 (user_id,),
@@ -94,6 +128,8 @@ class PlayerStore:
                 )
                 conn.commit()
                 wallet = (player.gold, player.crystals)
+        migrate_equipment_names(player)
+        migrate_crystal_reward_names(player)
         player.gold = int(wallet[0])
         player.crystals = int(wallet[1])
         player.name = name
@@ -102,7 +138,7 @@ class PlayerStore:
         return player
 
     def save(self, player: Player) -> None:
-        with closing(self._connect()) as conn:
+        with closing(self._connect_shared()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             wallet = conn.execute(
                 "SELECT gold, crystals FROM shared_wallets WHERE user_id = ?",
@@ -122,7 +158,7 @@ class PlayerStore:
                 gold_delta = player.gold - loaded_gold
                 crystal_delta = player.crystals - loaded_crystals
                 conn.execute(
-                    "UPDATE shared_wallets SET gold=MAX(0, gold+?), "
+                    "UPDATE shared_wallets SET gold=gold+?, "
                     "crystals=MAX(0, crystals+?) WHERE user_id=?",
                     (gold_delta, crystal_delta, player.user_id),
                 )
@@ -132,6 +168,8 @@ class PlayerStore:
                 ).fetchone()
             player.gold = int(shared_gold)
             player.crystals = int(shared_crystals)
+            conn.commit()
+        with closing(self._connect()) as conn:
             payload = json.dumps(player.to_dict(), ensure_ascii=False)
             conn.execute(
                 "INSERT INTO players(user_id, state) VALUES(?, ?) "
@@ -160,7 +198,7 @@ class PlayerStore:
             conn.commit()
 
     def completed_players(self) -> list[tuple[int, int]]:
-        """返回至少完成过一次百层远征的玩家及其通关次数。"""
+        """返回至少完成过一次百层学园探索的玩家及其通关次数。"""
         completed: list[tuple[int, int]] = []
         with closing(self._connect()) as conn:
             rows = conn.execute("SELECT user_id, state FROM players").fetchall()

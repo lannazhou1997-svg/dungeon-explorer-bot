@@ -84,7 +84,7 @@ class SchoolContentTests(unittest.TestCase):
         self.assertEqual(len(result["options"]), 4)
         self.assertEqual(result["options"][result["correct_index"]], result["answer"])
 
-    def test_final_boss_cannot_be_defeated_before_three_subject_questions(self):
+    def test_final_boss_cannot_be_defeated_before_three_character_questions(self):
         engine = GameEngine(random.Random(8))
         player = Player(1, "高攻击测试者", floor=100, level=500)
         player.enemy = engine._make_boss(100)
@@ -97,7 +97,7 @@ class SchoolContentTests(unittest.TestCase):
             answer = int(player.pending_quiz["correct_index"])
             engine.answer_quiz(player, answer, now=float(player.pending_quiz["deadline"]) - 1)
 
-        self.assertEqual(subjects, ["英语", "语文", "数学"])
+        self.assertEqual(subjects, ["角色卡", "角色卡", "角色卡"])
         self.assertIsNotNone(player.enemy)
 
 

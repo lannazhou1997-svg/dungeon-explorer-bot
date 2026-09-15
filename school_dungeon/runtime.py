@@ -42,6 +42,7 @@ PROJECT_ROOT = Path(__file__).parent
 load_dotenv(PROJECT_ROOT.parent / ".env")
 engine = GameEngine()
 store = PlayerStore(PROJECT_ROOT / "data" / "school_dungeon.db")
+QUIZ_TIMEOUT_TASKS: set[asyncio.Task[None]] = set()
 TAVERN_IMAGE = Path(__file__).parent / "assets" / "adventurer-tavern-chibi-hq.jpg"
 CAVE_IMAGE = Path(__file__).parent / "assets" / "school-entrance.png"
 FLOOR_SCENE_DIR = Path(__file__).parent / "assets" / "floors"
@@ -58,17 +59,55 @@ FORTUNE_DRAWS_FILE = Path(os.getenv(
 views_added = False
 titles_backfilled = False
 HOST_ENTRANCE_PANEL_FACTORY = None
+HOST_PLAYER_STORE = None
 ICE_SOUL_BLUE = 0x4A90E2
 FROST_SNOW_BLUE = 0xE6F7FF
 ADVENTURER_ROLES = {
-    1: ("❄️ 一星冒险者", ICE_SOUL_BLUE, FROST_SNOW_BLUE),
-    2: ("❄️ 二星冒险者", 0x18B8D8, 0xBDF6FF),
-    3: ("❄️ 三星冒险者", 0x246BFD, 0x8FC7FF),
-    4: ("❄️ 四星冒险者", 0x054ACB, 0x73A9FF),
-    5: ("❄️ 初级冒险者", 0x0A254A, 0x4F9AD6),
+    1: ("❄️ 一星学生", ICE_SOUL_BLUE, FROST_SNOW_BLUE),
+    2: ("❄️ 二星学生", 0x18B8D8, 0xBDF6FF),
+    3: ("❄️ 三星学生", 0x246BFD, 0x8FC7FF),
+    4: ("❄️ 四星学生", 0x054ACB, 0x73A9FF),
+    5: ("❄️ 优秀学生", 0x0A254A, 0x4F9AD6),
 }
 ADVENTURER_ROLE_NAMES = {spec[0] for spec in ADVENTURER_ROLES.values()}
-DUNGEON_ADVENTURER_ROLE_NAME = "🏫 学园冒险者"
+DUNGEON_ADVENTURER_ROLE_NAME = "🏫 诡异学园学生"
+DUNGEON_ONE_NAME = "地下城一｜幽灯岩窟"
+DUNGEON_TWO_NAME = "地下城二｜永不下课的学园"
+
+
+def active_adventure_names(user_id: int, name: str) -> tuple[str, ...]:
+    """返回玩家仍未结束的冒险；兼容修复前可能同时存在的两份进度。"""
+    active: list[str] = []
+    if HOST_PLAYER_STORE is not None:
+        host_player = HOST_PLAYER_STORE.get(user_id, name)
+        if host_player.is_adventuring:
+            active.append(DUNGEON_ONE_NAME)
+    school_player = store.get(user_id, name)
+    if school_player.is_adventuring:
+        active.append(DUNGEON_TWO_NAME)
+    return tuple(active)
+
+
+def active_adventure_text(active: tuple[str, ...]) -> str:
+    return "、".join(f"**{item}**" for item in active)
+
+
+async def reject_tavern_service(
+    interaction: discord.Interaction,
+    service_name: str,
+) -> bool:
+    active = active_adventure_names(
+        interaction.user.id,
+        interaction.user.display_name,
+    )
+    if not active:
+        return False
+    await interaction.response.send_message(
+        f"⚔️ 你仍身处 {active_adventure_text(active)}，无法使用{service_name}。"
+        "请先结束当前冒险并返回酒馆。",
+        ephemeral=True,
+    )
+    return True
 
 
 def bar(value: int, maximum: int, width: int = 10) -> str:
@@ -90,12 +129,12 @@ def sync_player_fortune(player: Player, guild_id: int | None) -> int:
 
 def fortune_status_text(player: Player) -> str:
     if player.daily_fortune_score <= 0:
-        return "🪷 今日尚未问卦｜精灵水晶概率增长 **0%**"
+        return "🪷 今日尚未问卦｜新生谢礼水晶概率增长 **0%**"
     if player.daily_fortune_growth <= 0:
         return f"🪷 今日总运 **{player.daily_fortune_score}/100**｜卦气平稳"
     return (
         f"🪷 今日总运 **{player.daily_fortune_score}/100**｜"
-        f"精灵与藏宝图水晶概率增长 **{player.daily_fortune_growth:.0%}**"
+        f"新生谢礼与藏宝图水晶概率增长 **{player.daily_fortune_growth:.0%}**"
     )
 
 
@@ -114,7 +153,7 @@ def weekly_ranking_embed() -> discord.Embed:
         ]
         description = "\n".join(lines)
     else:
-        description = "本周还没有冒险者留下挑战记录。"
+        description = "本周还没有学生留下挑战记录。"
     embed = discord.Embed(
         title="🏫 永不下课的学园｜每周挑战层数排行",
         description=description,
@@ -202,7 +241,7 @@ async def backfill_adventurer_titles() -> None:
     if guild is None and len(bot.guilds) == 1:
         guild = bot.guilds[0]
     if guild is None:
-        print("无法确定服务器，暂未补发冒险者通关称号。")
+        print("无法确定服务器，暂未补发学生通关称号。")
         return
     awarded = 0
     skipped = 0
@@ -213,7 +252,7 @@ async def backfill_adventurer_titles() -> None:
             skipped += 1
             continue
         except discord.HTTPException as error:
-            print(f"补发冒险者称号时无法读取成员 {user_id}：{error}")
+            print(f"补发学生称号时无法读取成员 {user_id}：{error}")
             skipped += 1
             continue
         status, role = await award_adventurer_title(member, completion_count)
@@ -223,8 +262,8 @@ async def backfill_adventurer_titles() -> None:
             awarded += 1
         else:
             skipped += 1
-        print(f"冒险者称号核对 {user_id}：{status}")
-    print(f"冒险者称号补发完成：处理 {awarded} 人，跳过或已拥有 {skipped} 人。")
+        print(f"学生称号核对 {user_id}：{status}")
+    print(f"学生称号补发完成：处理 {awarded} 人，跳过或已拥有 {skipped} 人。")
 
 
 async def ensure_dungeon_adventurer_role(
@@ -238,12 +277,12 @@ async def ensure_dungeon_adventurer_role(
                 colour=discord.Colour.default(),
                 hoist=False,
                 mentionable=False,
-                reason="标记实际参与过地下城的冒险者",
+                reason="标记实际参与过诡异学园的学生",
             )
             try:
                 role = await role.edit(
                     position=1,
-                    reason="将地下城冒险者后台身份组放在最下方",
+                    reason="将诡异学园学生后台身份组放在最下方",
                 )
             except discord.HTTPException:
                 pass
@@ -254,7 +293,7 @@ async def ensure_dungeon_adventurer_role(
             return None
         return role
     except (discord.Forbidden, discord.HTTPException) as error:
-        print(f"创建地下城冒险者身份组失败：{error}")
+        print(f"创建诡异学园学生身份组失败：{error}")
         return None
 
 
@@ -268,7 +307,7 @@ async def assign_dungeon_adventurer_role(member: discord.Member) -> bool:
         await member.add_roles(role, reason="首次进入幽灯岩窟")
         return True
     except (discord.Forbidden, discord.HTTPException) as error:
-        print(f"为成员 {member.id} 添加地下城冒险者身份组失败：{error}")
+        print(f"为成员 {member.id} 添加诡异学园学生身份组失败：{error}")
         return False
 
 
@@ -278,7 +317,7 @@ async def backfill_dungeon_adventurer_roles() -> None:
     if guild is None and len(bot.guilds) == 1:
         guild = bot.guilds[0]
     if guild is None:
-        print("无法确定服务器，暂未补发地下城冒险者后台身份组。")
+        print("无法确定服务器，暂未补发诡异学园学生后台身份组。")
         return
     role = await ensure_dungeon_adventurer_role(guild)
     if role is None:
@@ -290,7 +329,7 @@ async def backfill_dungeon_adventurer_roles() -> None:
         except discord.NotFound:
             continue
         except discord.HTTPException as error:
-            print(f"补发地下城冒险者身份组时无法读取成员 {user_id}：{error}")
+            print(f"补发诡异学园学生身份组时无法读取成员 {user_id}：{error}")
             continue
         if role in member.roles:
             continue
@@ -298,8 +337,8 @@ async def backfill_dungeon_adventurer_roles() -> None:
             await member.add_roles(role, reason="按地下城存档补发后台身份组")
             assigned += 1
         except (discord.Forbidden, discord.HTTPException) as error:
-            print(f"补发地下城冒险者身份组给 {user_id} 失败：{error}")
-    print(f"地下城冒险者后台身份组补发完成：新增 {assigned} 人。")
+            print(f"补发诡异学园学生身份组给 {user_id} 失败：{error}")
+    print(f"诡异学园学生后台身份组补发完成：新增 {assigned} 人。")
 
 
 def completion_celebration_copy(completion_count: int) -> tuple[str, str]:
@@ -309,41 +348,41 @@ def completion_celebration_copy(completion_count: int) -> tuple[str, str]:
             "这是百层通关的勋章和奖励。下次再接再厉吧，"
             "我会一直关注你的。”\n"
             "——by **酒馆老板小小秦** 🥂❄️",
-            "🎊 第一次百层远征完成，新的传说从酒馆开始！",
+            "🎊 第一次百层学园探索完成，新的传说从酒馆开始！",
         )
     if completion_count == 2:
         return (
             "### “第二次从王座走回来了？看来第一次并不是运气。\n"
             "收下这枚更明亮的冰晶吧——从今天起，大家会记住你的名字。”\n"
             "——by **酒馆老板小小秦** 🥂🧊",
-            "✨ 第二次百层远征完成，你已晋升为二星冒险者！",
+            "✨ 第二次百层学园探索完成，你已晋升为二星学生！",
         )
     if completion_count == 3:
         return (
             "### “三次踏过同一场风雪，还能带着笑回来……真了不起。\n"
             "幽灯岩窟已经无法埋没你的光芒，这份三星荣誉属于你。”\n"
             "——by **酒馆老板小小秦** 🥂💠",
-            "💠 第三次百层远征完成，你的冒险传说愈发耀眼！",
+            "💠 第三次百层学园探索完成，你的冒险传说愈发耀眼！",
         )
     if completion_count == 4:
         return (
             "### “第四次百层凯旋。现在，就连岩窟深处的怪物也会畏惧你的脚步。\n"
-            "接下这枚深蓝勋章吧——距离真正的冒险者，只差最后一次证明。”\n"
+            "接下这枚深蓝勋章吧——距离优秀学生，只差最后一次证明。”\n"
             "——by **酒馆老板小小秦** 🥂🌊",
-            "🌊 第四次百层远征完成，最终晋升试炼已经开启！",
+            "🌊 第四次百层学园探索完成，最终晋升试炼已经开启！",
         )
     if completion_count == 5:
         return (
-            "### “五次百层远征，五次平安归来。你已经不再是追逐传说的人——\n"
-            "从这一刻起，你就是传说本身。欢迎回来，初级冒险者。”\n"
+            "### “五次百层学园探索，五次平安归来。你已经不再是追逐传说的人——\n"
+            "从这一刻起，你就是传说本身。欢迎回来，优秀学生。”\n"
             "——by **酒馆老板小小秦** 🥂🏅",
-            "🏅 第五次百层远征完成，正式晋升为初级冒险者！",
+            "🏅 第五次百层学园探索完成，正式晋升为优秀学生！",
         )
     return (
         f"### “第 {completion_count} 次凯旋，酒馆的灯依然为你亮着。\n"
-        "真正的冒险没有终点——欢迎回来，冒险者。”\n"
+        "真正的求学没有终点——欢迎回来，学生。”\n"
         "——by **酒馆老板小小秦** 🥂❄️",
-        f"❄️ 第 {completion_count} 次百层远征完成，新的征途仍在继续！",
+        f"❄️ 第 {completion_count} 次百层学园探索完成，新的征途仍在继续！",
     )
 
 
@@ -459,9 +498,9 @@ def inventory_embed(player: Player) -> discord.Embed:
         f"• {name} × **{count}**" for name, count in player.consumables.items() if count
     ) or "空空如也"
     embed = discord.Embed(
-        title=f"🎒 {player.name} 的冒险者档案",
+        title=f"🎒 {player.name} 的学生档案",
         description=(
-            f"远征难度 **★{player.completion_count}**　"
+            f"探索难度 **★{player.completion_count}**　"
             f"**Lv.{player.level}**　EXP **{player.exp}/{player.exp_required}**\n"
             f"当前位于 **第 {player.floor} 层**　探索 **{player.steps}/{player.required_steps}**"
         ),
@@ -484,13 +523,13 @@ def inventory_embed(player: Player) -> discord.Embed:
             f"最终：攻击加成 **+{display_number(player.attack_bonus)}**｜"
             f"防御 **{display_number(player.defense)}**\n"
             f"敏捷 **{display_number(player.agility)}**｜幸运 **{display_number(player.luck)}**\n"
-            f"商人护符：赤牙 ×{player.merchant_charm_base_stats.get('attack', 0)} "
+            f"竞赛加分：学科 ×{player.merchant_charm_base_stats.get('attack', 0)} "
             f"(**+{display_number(player.merchant_charm_bonus('attack'))}**)｜"
-            f"石纹 ×{player.merchant_charm_base_stats.get('defense', 0)} "
+            f"科创 ×{player.merchant_charm_base_stats.get('defense', 0)} "
             f"(**+{display_number(player.merchant_charm_bonus('defense'))}**)\n"
-            f"风羽 ×{player.merchant_charm_base_stats.get('agility', 0)} "
+            f"体育 ×{player.merchant_charm_base_stats.get('agility', 0)} "
             f"(**+{display_number(player.merchant_charm_bonus('agility'))}**)｜"
-            f"四叶 ×{player.merchant_charm_base_stats.get('luck', 0)} "
+            f"人文 ×{player.merchant_charm_base_stats.get('luck', 0)} "
             f"(**+{display_number(player.merchant_charm_bonus('luck'))}**)\n"
             f"水晶护符（不衰减）：攻击 **+{display_number(player.crystal_charm_bonus('attack'))}**｜"
             f"防御 **+{display_number(player.crystal_charm_bonus('defense'))}**｜"
@@ -511,7 +550,7 @@ def inventory_embed(player: Player) -> discord.Embed:
         inline=True,
     )
     embed.add_field(name="🪷 今日卦运联动", value=fortune_status_text(player), inline=False)
-    embed.set_footer(text="使用酒馆里的“装备库”可随时切换已经获得的装备。")
+    embed.set_footer(text="使用酒馆里的“学生物品栏”可随时切换已经获得的物品。")
     return embed
 
 
@@ -568,12 +607,12 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
     else:
         event += f"\n\n## {event_section(title, False)}"
     status = (
-        f"## 🧙 冒险者｜{player.name}\n"
-        f"远征难度 **★{player.completion_count}**　"
+        f"## 🧑‍🎓 学生｜{player.name}\n"
+        f"探索难度 **★{player.completion_count}**　"
         f"**Lv.{player.level}**　EXP **{player.exp}/{player.exp_required}**　"
         f"🗡️ 攻击 **{8 + player.level * 2}～{12 + player.level * 3} "
         f"+ {display_number(player.attack_bonus)}**\n"
-        "🔮 星火弹 **×1.20/6MP**　月辉矢 **×1.50/12MP**　奥术流星 **×1.85/22MP**\n"
+        "🔮 学识火花 **×1.20/6精神力**　灵感光矢 **×1.50/12精神力**　真理星雨 **×1.85/22精神力**\n"
         f"❤️ `{bar(player.hp, player.max_hp)}` **{display_number(player.hp)}/{display_number(player.max_hp)}**\n"
         f"💧 `{bar(player.mp, player.max_mp)}` **{display_number(player.mp)}/{display_number(player.max_mp)}**\n"
         f"⚡ `{bar(player.energy, player.max_energy)}` **{display_number(player.energy)}/{display_number(player.max_energy)}**\n\n"
@@ -581,13 +620,13 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
         f"🪙 **{player.gold}**　🔮 **{player.crystals}**　"
         f"⚔️ **{player.weapon} +{player.weapon_attack}**　👕 **{player.clothing}**\n"
         f"🛡️ 防御 **{display_number(player.defense)}**　💨 敏捷 **{display_number(player.agility)}**　🍀 幸运 **{display_number(player.luck)}**\n"
-        f"🧿 护符：赤牙 ×{player.merchant_charm_base_stats.get('attack', 0)} "
+        f"🏅 竞赛加分：学科 ×{player.merchant_charm_base_stats.get('attack', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('attack'))})｜"
-        f"石纹 ×{player.merchant_charm_base_stats.get('defense', 0)} "
+        f"科创 ×{player.merchant_charm_base_stats.get('defense', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('defense'))})｜"
-        f"风羽 ×{player.merchant_charm_base_stats.get('agility', 0)} "
+        f"体育 ×{player.merchant_charm_base_stats.get('agility', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('agility'))})｜"
-        f"四叶 ×{player.merchant_charm_base_stats.get('luck', 0)} "
+        f"人文 ×{player.merchant_charm_base_stats.get('luck', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('luck'))})\n"
         f"💎 水晶护符（不衰减）：攻击 +{display_number(player.crystal_charm_bonus('attack'))}｜"
         f"防御 +{display_number(player.crystal_charm_bonus('defense'))}｜"
@@ -595,12 +634,12 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
         f"幸运 +{display_number(player.crystal_charm_bonus('luck'))}｜"
         f"抽取 {player.crystal_charm_draw_count} 次\n"
         f"{fortune_status_text(player)}\n"
-        f"🧪 治疗 **×{player.consumables.get('治疗药水', 0)}**　"
-        f"🧪 强效治疗 **×{player.consumables.get('强效治疗药水', 0)}**　"
-        f"💧 魔力 **×{player.consumables.get('魔力药水', 0)}**　"
-        f"💧 强效魔力 **×{player.consumables.get('强效魔力药水', 0)}**\n"
-        f"⚡ 精力 **×{player.consumables.get('精力药水', 0)}**　"
-        f"⚡ 强效精力 **×{player.consumables.get('强效精力药水', 0)}**\n"
+        f"🥛 学生牛奶 **×{player.consumables.get('学生牛奶', 0)}**　"
+        f"🍱 校园营养餐 **×{player.consumables.get('校园营养餐', 0)}**\n"
+        f"🧴 清凉油 **×{player.consumables.get('清凉油', 0)}**　"
+        f"🍬 强劲薄荷糖 **×{player.consumables.get('强劲薄荷糖', 0)}**\n"
+        f"🥤 运动饮料 **×{player.consumables.get('运动饮料', 0)}**　"
+        f"🧠 安神补脑液 **×{player.consumables.get('安神补脑液', 0)}**\n"
         f"👣 探索 **{player.steps}/{player.required_steps}**\n"
         "-# 探索消耗 3 精力｜互动消耗 2 精力｜超常发挥 ×1.5"
     )
@@ -636,9 +675,9 @@ class DungeonActions(discord.ui.ActionRow):
         elif player.enemy:
             buttons.extend([
                 DungeonActionButton("attack", "普通攻击", "⚔️", discord.ButtonStyle.danger),
-                DungeonActionButton("skill_minor", "星火弹·6MP", "✨", discord.ButtonStyle.primary),
-                DungeonActionButton("skill_medium", "月辉矢·12MP", "🔷", discord.ButtonStyle.primary),
-                DungeonActionButton("skill_major", "奥术流星·22MP", "🌠", discord.ButtonStyle.danger),
+                DungeonActionButton("skill_minor", "学识火花·6精神力", "✨", discord.ButtonStyle.primary),
+                DungeonActionButton("skill_medium", "灵感光矢·12精神力", "🔷", discord.ButtonStyle.primary),
+                DungeonActionButton("skill_major", "真理星雨·22精神力", "🌠", discord.ButtonStyle.danger),
             ])
         elif not player.pending_event:
             buttons.append(DungeonActionButton("explore", "继续探索", "👣", discord.ButtonStyle.primary))
@@ -680,29 +719,17 @@ class DungeonDeclineActions(discord.ui.ActionRow):
 class DungeonUtilities(discord.ui.ActionRow):
     def __init__(self, player: Player):
         buttons = [
-            DungeonActionButton("use_potion", "治疗药水", "🧪", discord.ButtonStyle.success),
-            DungeonActionButton("use_mana_potion", "魔力药水", "💧", discord.ButtonStyle.success),
-            DungeonActionButton("use_energy_potion", "精力药水", "⚡", discord.ButtonStyle.success),
+            DungeonActionButton("use_potion", "体力补给", "🥛", discord.ButtonStyle.success),
+            DungeonActionButton("use_mana_potion", "精神力补给", "🧴", discord.ButtonStyle.success),
+            DungeonActionButton("use_energy_potion", "精力补给", "🥤", discord.ButtonStyle.success),
             DungeonActionButton("refresh", "刷新", "🔄", discord.ButtonStyle.secondary),
         ]
-        if (
-            not player.enemy
-            and player.energy < 3
-            and player.consumables.get("精力药水", 0) <= 0
-            and player.consumables.get("强效精力药水", 0) <= 0
-        ):
-            buttons.append(DungeonActionButton(
-                "request_rescue",
-                "呼叫救援",
-                "🛺",
-                discord.ButtonStyle.danger,
-            ))
         super().__init__(*buttons)
 
 
 class ReturnTavernButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="返回冒险者酒馆", emoji="🍺", style=discord.ButtonStyle.primary)
+        super().__init__(label="返回酒馆", emoji="🍺", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         tavern_image = discord.File(TAVERN_IMAGE, filename="adventurer-tavern-chibi-hq.jpg")
@@ -738,7 +765,7 @@ class DungeonPanel(discord.ui.LayoutView):
             )
             coloured_title = result.role_mention or f"**{title_name}**"
             container.add_item(discord.ui.Section(
-                "# 🎉❄️ 百层远征完成！❄️🎉",
+                "# 🎉❄️ 百层学园探索完成！❄️🎉",
                 celebration_quote,
                 accessory=discord.ui.Thumbnail(
                     avatar_url,
@@ -784,7 +811,7 @@ class DungeonPanel(discord.ui.LayoutView):
                 "# 🛺 鼹鼠车夫把你送回来了\n"
                 f"{result.message}\n\n"
                 "### 🍺 小小秦说\n"
-                "> “能回来就好。下次出门前，记得检查精力药水。”"
+                "> “能回来就好。下次出门前，记得检查精力补给。”"
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(ReturnTavernButton()))
@@ -801,7 +828,7 @@ class DungeonPanel(discord.ui.LayoutView):
                 "随后以 **Lv.1**、全状态补满，直接返回酒馆。\n\n"
                 "## 方案二｜向女神祈祷：不返回酒馆\n"
                 "🙏 放弃当前 **全部等级和经验**，以 **Lv.1** 回到地下城第 **1 层**。\n"
-                "金币、装备和道具全部保留，体力、魔力和精力全部补满。\n\n"
+                "金币、装备和道具全部保留，体力、精神力和精力全部补满。\n\n"
                 "⚠️ 两种选择确认后都不能撤销，请仔细选择。"
             ))
             container.add_item(discord.ui.Separator())
@@ -840,6 +867,7 @@ class DungeonPanel(discord.ui.LayoutView):
             if player.pending_event in DECLINABLE_EVENTS:
                 container.add_item(DungeonDeclineActions(player))
             container.add_item(DungeonUtilities(player))
+            container.add_item(DungeonQuestUtilities(player))
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -884,7 +912,7 @@ class DungeonPanel(discord.ui.LayoutView):
             names = "、".join(quest.name for quest in newly_completed)
             result.message += (
                 f"\n\n🎉 **每日委托已完成：{names}**\n"
-                "回到酒馆点击 **每日任务** 即可领取奖励。"
+                "回到酒馆点击 **今日布置作业** 即可领取奖励。"
             )
         store.record_weekly_challenge(
             interaction.user.id,
@@ -933,13 +961,25 @@ class DungeonPanel(discord.ui.LayoutView):
         )
         if player.pending_quiz and interaction.message:
             quiz = dict(player.pending_quiz)
-            asyncio.create_task(expire_boss_quiz(
+            task = asyncio.create_task(expire_boss_quiz(
                 interaction.message,
                 self.owner_id,
                 player.name,
                 str(quiz["token"]),
                 float(quiz["deadline"]),
             ))
+            QUIZ_TIMEOUT_TASKS.add(task)
+            task.add_done_callback(finish_quiz_timeout_task)
+
+
+def finish_quiz_timeout_task(task: asyncio.Task[None]) -> None:
+    """持有倒计时任务直至结束，并记录意外异常。"""
+    QUIZ_TIMEOUT_TASKS.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error:
+        print(f"Boss答题倒计时任务失败：{error}")
 
 
 async def expire_boss_quiz(
@@ -1048,9 +1088,9 @@ class MerchantPanel(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(
             f"# 🧳 旅行商人｜{MERCHANT_NAME}\n"
             f"> “上课铃还没响。要买就快一点。”——**{MERCHANT_NAME}**\n\n"
-            "装备和护符库存为 1，药剂每格库存为 4。\n"
-            "药剂／护符售罄：药剂 60%｜护符 25%｜装备 15%。\n"
-            "装备售罄：只补药剂 70%｜护符 30%，不会连续补装备。\n"
+            "装备和竞赛加分库存为 1，药剂每格库存为 4。\n"
+            "药剂／竞赛加分售罄：药剂 60%｜竞赛加分 25%｜装备 15%。\n"
+            "装备售罄：只补药剂 70%｜竞赛加分 30%，不会连续补装备。\n"
             "也可以支付金币刷新全部四格。\n"
             "售罄补货和付费刷新共享本次相遇的 **5 次总额度**。\n"
             f"当前金币：**{player.gold}**｜刷新：**{player.merchant_refreshes}/5**"
@@ -1084,6 +1124,17 @@ class CaveSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        active = active_adventure_names(
+            interaction.user.id,
+            interaction.user.display_name,
+        )
+        if active and DUNGEON_TWO_NAME not in active:
+            await interaction.response.send_message(
+                f"⚔️ 你仍身处 {active_adventure_text(active)}，"
+                f"无法立刻进入 **{DUNGEON_TWO_NAME}**。请先结束当前冒险并返回酒馆。",
+                ephemeral=True,
+            )
+            return
         player = store.get(interaction.user.id, interaction.user.display_name)
         sync_player_fortune(player, interaction.guild_id)
         engine.ensure_floor(player)
@@ -1123,7 +1174,7 @@ class AdventurerTitleSelect(discord.ui.Select):
             for tier in range(1, unlocked_tier + 1)
         ]
         super().__init__(
-            placeholder="选择一个已解锁的冒险者称号……",
+            placeholder="选择一个已解锁的学生称号……",
             options=options,
             min_values=1,
             max_values=1,
@@ -1200,6 +1251,8 @@ class GoldStorageModal(discord.ui.Modal):
         self.add_item(self.amount)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if await reject_tavern_service(interaction, "储值商人"):
+            return
         player = store.get(interaction.user.id, interaction.user.display_name)
         try:
             amount = int(str(self.amount.value).strip())
@@ -1242,6 +1295,9 @@ class GoldStorageView(discord.ui.View):
         self.add_item(GoldStorageActionButton("deposit"))
         self.add_item(GoldStorageActionButton("withdraw"))
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return not await reject_tavern_service(interaction, "储值商人")
+
 
 class GoldStorageButton(discord.ui.Button):
     def __init__(self):
@@ -1251,12 +1307,9 @@ class GoldStorageButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        if player.is_adventuring:
-            await interaction.response.send_message(
-                "冒险途中无法使用储值商人，请先返回酒馆。", ephemeral=True
-            )
+        if await reject_tavern_service(interaction, "储值商人"):
             return
+        player = store.get(interaction.user.id, interaction.user.display_name)
         await interaction.response.send_message(
             "# 🏦 酒馆储值商人\n"
             "这里只保管金币，不收手续费，也不产生利息。\n\n"
@@ -1329,7 +1382,7 @@ class GoldShopPanel(discord.ui.LayoutView):
         stock = daily_stock(today_key())
         container = discord.ui.Container(accent_colour=0xE0A12B)
         container.add_item(discord.ui.Section(
-            "# 🪙 金币商城开张！",
+            "# 🪙 诡异学园金币商店",
             "### 只收金币，不收眼泪；买完不退，哭也没用。\n——by **酒馆老板小小秦**",
             accessory=discord.ui.Thumbnail(
                 bot.user.display_avatar.url,
@@ -1347,13 +1400,14 @@ class GoldShopPanel(discord.ui.LayoutView):
         result_text = f"\n\n> {result}" if result else ""
         container.add_item(discord.ui.TextDisplay(
             "## 📖 属性怎么算？\n"
-            "⚔️ **攻击**：直接加进每次普通攻击和魔法伤害。\n"
+            "⚔️ **攻击**：直接加进每次普通攻击和招式伤害。\n"
             "🛡️ **防御**：怪物反击伤害 − 防御；随机事件还会额外减去 `防御 ÷ 3`。\n"
             "💨 **敏捷**：每点提供 **1.5% 闪避**（最高 35%）；"
             "随机事件损失再减去 `敏捷 ÷ 2`。\n"
             "🍀 **幸运**：每点增加 **0.5% 超常发挥、1.5% 战后额外掉落、"
-            "1.5% 真宝箱概率**；宝箱金币每点 +3%，额外药水概率每点 +2%。\n"
+            "1.5% 真宝箱概率**；宝箱金币每点 +3%，额外校园补给概率每点 +2%。\n"
             "> 真宝箱基础概率 62.5%，最高 90%；各项概率均有上限，计算结果向下取整。\n"
+            "🏫 **装备归属：地下城二**｜本店武器、护具只能在地下城二装备和使用，不能带入地下城一。\n"
             f"当前金币：🪙 **{player.gold}**｜今日日期：**{today_key()}**\n"
             "可连续选择商品购买；全部买完后，再点击下方的 **返回酒馆**。"
             f"{result_text}"
@@ -1366,10 +1420,10 @@ class GoldShopPanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的金币商城面板。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的金币商城面板。", ephemeral=True)
+            return False
+        return not await reject_tavern_service(interaction, "金币商店")
 
 
 class GoldShopButton(discord.ui.Button):
@@ -1380,13 +1434,9 @@ class GoldShopButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        if player.is_adventuring:
-            await interaction.response.send_message(
-                "⚔️ 冒险途中无法使用金币商城。死亡并返回酒馆后才能再次购买。",
-                ephemeral=True,
-            )
+        if await reject_tavern_service(interaction, "金币商店"):
             return
+        player = store.get(interaction.user.id, interaction.user.display_name)
         shop_image = discord.File(GOLD_SHOP_IMAGE, filename="gold-shop-banner.jpg")
         await interaction.response.send_message(
             view=GoldShopPanel(interaction.user.id, player),
@@ -1487,9 +1537,9 @@ class CrystalExchangePanel(discord.ui.LayoutView):
             accent_colour=accent_colours.get(result_rarity, 0x7846B8)
         )
         container.add_item(discord.ui.Section(
-            "# 🔮 女巫的水晶秘藏",
+            "# 🔮 神秘研究社库藏",
             "### “水晶会选择自己的主人。至于抽到什么……命运可不接受退货。”\n"
-            "——by **秘藏女巫**",
+            "——by **神秘研究社社长**",
             accessory=discord.ui.Thumbnail(
                 bot.user.display_avatar.url,
                 description="水晶兑换",
@@ -1500,7 +1550,7 @@ class CrystalExchangePanel(discord.ui.LayoutView):
             gallery = discord.ui.MediaGallery()
             gallery.add_item(
                 media="attachment://crystal-exchange-banner.jpg",
-                description="女巫的水晶秘藏",
+                description="神秘研究社库藏",
             )
             container.add_item(gallery)
         container.add_item(discord.ui.Separator())
@@ -1510,8 +1560,9 @@ class CrystalExchangePanel(discord.ui.LayoutView):
             "必定获得 **优良或以上**的装备／护符。\n"
             "📊 **单次概率：优良 45%｜稀有 35%｜黄金 17%｜传说 3%**\n"
             "可选择砸 **1 次／5 次／10 次**；多次兑换的每一件奖励独立计算概率。\n"
-            "🏰 **探索途中也可以砸水晶**，不会改变当前楼层、战斗或探索进度。\n"
-            "武器和护具会放入 **酒馆装备库**，之后可自由选择穿戴；"
+            "🏫 **学园探索途中也可以砸水晶**，不会改变当前楼层、战斗或探索进度。\n"
+            "🏫 **奖池归属：地下城二｜神秘研究社库藏**。\n"
+            "武器和护具会放入 **学生物品栏**，只能在地下城二选择穿戴；"
             "护符会直接提供少量永久属性。\n"
             "兑换结果彼此独立，传说装备极其稀有。\n\n"
             f"当前水晶：🔮 **{player.crystals}**\n\n"
@@ -1558,10 +1609,10 @@ class CrystalExchangePanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的水晶兑换面板。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的水晶兑换面板。", ephemeral=True)
+            return False
+        return True
 
 
 class CrystalShopButton(discord.ui.Button):
@@ -1646,8 +1697,9 @@ class EquipmentLibraryPanel(discord.ui.LayoutView):
         message = f"\n\n> ✅ {result}" if result else ""
         container = discord.ui.Container(accent_colour=0x5378B8)
         container.add_item(discord.ui.TextDisplay(
-            "# 🧰 冒险者装备库\n"
-            "金币商店、旅行商人和水晶兑换获得的武器与护具都会收藏在这里。\n"
+            "# 🧰 学生物品栏\n"
+            "诡异学园金币商店、校园小卖部老板和神秘研究社库藏获得的武器与护具都会收藏在这里。\n"
+            "这里的装备只能用于地下城二，不能带入地下城一。\n"
             "同名装备自动去重，不会重复占据下拉栏。\n\n"
             f"当前武器：⚔️ **{player.weapon}**\n"
             f"当前护具：🛡️ **{player.clothing}**\n"
@@ -1666,16 +1718,16 @@ class EquipmentLibraryPanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的装备库。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的学生物品栏。", ephemeral=True)
+            return False
+        return True
 
 
 class EquipmentLibraryButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
-            label="装备库", emoji="🧰", style=discord.ButtonStyle.secondary,
+            label="学生物品栏", emoji="🧰", style=discord.ButtonStyle.secondary,
             custom_id="dungeon:equipment_library",
         )
 
@@ -1692,7 +1744,7 @@ class EquipmentLibraryButton(discord.ui.Button):
 class MyStatusButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
-            label="我的情况", emoji="🎒", style=discord.ButtonStyle.success,
+            label="学生档案", emoji="🎒", style=discord.ButtonStyle.success,
             custom_id="dungeon:my_status",
         )
 
@@ -1721,7 +1773,7 @@ def daily_quest_embed(player: Player) -> discord.Embed:
             f"{quest.description}｜奖励 **{quest.reward_text}**"
         )
     embed = discord.Embed(
-        title="📜 今日冒险委托",
+        title="📝 今日布置作业",
         description="\n\n".join(lines),
         color=0x48B8C7,
     )
@@ -1758,13 +1810,19 @@ class DailyQuestClaimView(discord.ui.View):
 class DailyQuestButton(discord.ui.Button):
     def __init__(self, custom_id: str = "dungeon:daily_quests"):
         super().__init__(
-            label="每日任务",
+            label="今日布置作业",
             emoji="📜",
             style=discord.ButtonStyle.success,
             custom_id=custom_id,
         )
+        self.available_in_adventure = custom_id == "dungeon:adventure_daily_quests"
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if (
+            not self.available_in_adventure
+            and await reject_tavern_service(interaction, "酒馆每日任务面板")
+        ):
+            return
         player = store.get(interaction.user.id, interaction.user.display_name)
         sync_daily_quests(player, today_key())
         store.save(player)
@@ -1777,12 +1835,46 @@ class DailyQuestButton(discord.ui.Button):
 
 class DailyQuestButtons(discord.ui.ActionRow):
     def __init__(self):
-        super().__init__(DailyQuestButton())
+        super().__init__(DailyQuestButton(), PotionConversionButton())
+
+
+class PotionConversionButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="一键合成补给",
+            emoji="🧪",
+            style=discord.ButtonStyle.primary,
+            custom_id="dungeon:convert_potions",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        player = store.get(interaction.user.id, interaction.user.display_name)
+        result = engine.convert_potions(player)
+        store.save(player)
+        await interaction.response.send_message(
+            f"**{result.title}**\n{result.message}",
+            ephemeral=True,
+        )
 
 
 class DungeonQuestUtilities(discord.ui.ActionRow):
-    def __init__(self):
-        super().__init__(DailyQuestButton("dungeon:adventure_daily_quests"))
+    def __init__(self, player: Player):
+        buttons: list[discord.ui.Button] = [
+            DailyQuestButton("dungeon:adventure_daily_quests"),
+            DungeonActionButton(
+                "convert_potions", "一键合成补给", "🧪", discord.ButtonStyle.primary,
+            ),
+        ]
+        if (
+            not player.enemy
+            and player.energy < 3
+            and player.consumables.get("运动饮料", 0) <= 0
+            and player.consumables.get("安神补脑液", 0) <= 0
+        ):
+            buttons.append(DungeonActionButton(
+                "request_rescue", "呼叫救援", "🛺", discord.ButtonStyle.danger,
+            ))
+        super().__init__(*buttons)
 
 
 class EntranceButtons(discord.ui.ActionRow):
@@ -1801,7 +1893,7 @@ class EntrancePanel(discord.ui.LayoutView):
         super().__init__(timeout=None)
         container = discord.ui.Container(accent_colour=0x48B8C7)
         container.add_item(discord.ui.Section(
-            "# 🍺 冒险者酒馆",
+            "# 🍺 学园酒馆",
             "### **欢迎回来勇者，接取委托、整理行囊，然后从这里滚去你的冒险。——by 酒馆老板小小秦**",
             accessory=discord.ui.Thumbnail(
                 client_user.display_avatar.url,
@@ -1812,25 +1904,25 @@ class EntrancePanel(discord.ui.LayoutView):
         gallery = discord.ui.MediaGallery()
         gallery.add_item(
             media="attachment://adventurer-tavern-chibi-hq.jpg",
-            description="热闹又温暖的冒险者酒馆",
+            description="热闹又温暖的学园酒馆",
         )
         container.add_item(gallery)
         container.add_item(discord.ui.Separator())
         quests = quests_for(today_key())
         container.add_item(discord.ui.TextDisplay(
-            "## 📜 今日冒险委托\n"
+            "## 📝 今日布置作业\n"
             + "\n".join(
                 f"> {quest.emoji} **{quest.name}**｜{quest.description}，"
                 f"奖励 **{quest.reward_text}**"
                 for quest in quests
             )
-            + f"\n-# 北京时间每日刷新｜{today_key()}｜点击下方 **每日任务** 查看进度并领取。"
+            + f"\n-# 北京时间每日刷新｜{today_key()}｜点击下方 **今日布置作业** 查看进度并领取。"
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "## 👤 当前冒险者情况\n"
-            "点击 **我的情况**，随时查看个人等级、状态、装备、道具和货币。\n"
-            "-# 个人数据仅自己可见，不会与其他冒险者混淆。"
+            "## 👤 当前学生情况\n"
+            "点击 **学生档案**，随时查看个人等级、状态、装备、道具和货币。\n"
+            "-# 个人数据仅自己可见，不会与其他学生混淆。"
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(DailyQuestButtons())
@@ -1870,11 +1962,15 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 def bind_runtime(
     host_bot: commands.Bot,
     entrance_panel_factory=None,
+    host_player_store=None,
 ) -> None:
     """把学园地下城绑定到已经登录的地下城一 Bot。"""
-    global bot, HOST_ENTRANCE_PANEL_FACTORY
+    global bot, HOST_ENTRANCE_PANEL_FACTORY, HOST_PLAYER_STORE
     bot = host_bot
     HOST_ENTRANCE_PANEL_FACTORY = entrance_panel_factory
+    HOST_PLAYER_STORE = host_player_store
+    if host_player_store is not None:
+        store.set_shared_path(host_player_store.path)
 
 
 def host_entrance_panel() -> discord.ui.LayoutView:
@@ -1885,13 +1981,30 @@ def host_entrance_panel() -> discord.ui.LayoutView:
 
 async def enter_school(interaction: discord.Interaction) -> None:
     """从共享酒馆选择页进入地下城二，并使用独立学园存档。"""
-    await interaction.response.defer()
+    active = active_adventure_names(
+        interaction.user.id,
+        interaction.user.display_name,
+    )
+    if active and DUNGEON_TWO_NAME not in active:
+        await interaction.response.send_message(
+            f"⚔️ 你仍身处 {active_adventure_text(active)}，"
+            f"无法立刻进入 **{DUNGEON_TWO_NAME}**。请先结束当前冒险并返回酒馆。",
+            ephemeral=True,
+        )
+        return
+    if HOST_PLAYER_STORE is not None:
+        host_player = HOST_PLAYER_STORE.get(
+            interaction.user.id,
+            interaction.user.display_name,
+        )
+        HOST_PLAYER_STORE.save(host_player)
     player = store.get(interaction.user.id, interaction.user.display_name)
     sync_player_fortune(player, interaction.guild_id)
     engine.ensure_floor(player)
     player.in_adventure = True
     player.gold_storage_available = False
     store.save(player)
+    await interaction.response.defer()
     result = GameResult(
         "🏫 永不下课的学园",
         "你推开封闭的校门，教学楼里传来本不该响起的上课铃……",
@@ -1951,17 +2064,17 @@ async def challenge_ranking(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=weekly_ranking_embed(), ephemeral=True)
 
 
-@bot.tree.command(name="冒险者称号", description="切换一个已经解锁的百层通关称号颜色")
+@bot.tree.command(name="学生称号", description="切换一个已经解锁的百层通关称号颜色")
 async def adventurer_title(interaction: discord.Interaction) -> None:
     player = store.get(interaction.user.id, interaction.user.display_name)
     if player.completion_count <= 0:
         await interaction.response.send_message(
-            "你还没有解锁冒险者称号。首次通关幽灯岩窟第 100 层后即可获得。",
+            "你还没有解锁学生称号。首次通关诡异学园第 100 层后即可获得。",
             ephemeral=True,
         )
         return
     await interaction.response.send_message(
-        f"你已完成 **{player.completion_count}** 次百层远征。"
+        f"你已完成 **{player.completion_count}** 次百层学园探索。"
         "请选择想要展示的称号颜色：",
         view=AdventurerTitleView(player),
         ephemeral=True,
@@ -1997,7 +2110,7 @@ async def set_challenge_ranking_channel(interaction: discord.Interaction) -> Non
     discord.app_commands.Choice(name="宝箱怪（先伪装）", value="mimic"),
     discord.app_commands.Choice(name="宁静泉水", value="fountain"),
     discord.app_commands.Choice(name="旅行商人", value="merchant"),
-    discord.app_commands.Choice(name="受伤的精灵", value="fairy"),
+    discord.app_commands.Choice(name="忘带作业的新生", value="fairy"),
     discord.app_commands.Choice(name="神秘石像", value="mystery"),
     discord.app_commands.Choice(name="藏宝图", value="treasure_map"),
     discord.app_commands.Choice(name="受困妖兽", value="trapped_beast"),
@@ -2118,10 +2231,10 @@ async def dungeon_test(
                         *roles,
                         reason="管理员使用地下城全部清零测试",
                     )
-                    role_status = "\n已移除全部冒险者通关身份组。"
+                    role_status = "\n已移除全部学生通关身份组。"
                 except discord.Forbidden:
                     role_status = (
-                        "\n无法移除冒险者通关身份组："
+                        "\n无法移除学生通关身份组："
                         "请检查 Bot 的“管理身份组”权限和身份组层级。"
                     )
                 except discord.HTTPException as error:
@@ -2158,7 +2271,7 @@ async def gold_test(interaction: discord.Interaction) -> None:
     store.save(player)
     await interaction.response.send_message(
         "🧪 已发放 **20,000 测试金币**！\n"
-        f"你现在共有 🪙 **{player.gold}** 金币。返回冒险者酒馆后即可打开金币商城测试装备。",
+        f"你现在共有 🪙 **{player.gold}** 金币。返回酒馆后即可打开金币商城测试装备。",
         ephemeral=True,
     )
 

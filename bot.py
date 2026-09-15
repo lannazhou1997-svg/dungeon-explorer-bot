@@ -68,6 +68,13 @@ ADVENTURER_ROLE_NAMES = {spec[0] for spec in ADVENTURER_ROLES.values()}
 DUNGEON_ADVENTURER_ROLE_NAME = "🗺️ 地下城冒险者"
 
 
+async def reject_tavern_service(
+    interaction: discord.Interaction,
+    service_name: str,
+) -> bool:
+    return await school_runtime.reject_tavern_service(interaction, service_name)
+
+
 def bar(value: int, maximum: int, width: int = 10) -> str:
     filled = round(width * value / maximum) if maximum else 0
     return "▰" * filled + "▱" * (width - filled)
@@ -562,7 +569,7 @@ def player_panel_text(player: Player, result: GameResult | None) -> tuple[str, s
         f"🪙 **{player.gold}**　🔮 **{player.crystals}**　"
         f"⚔️ **{player.weapon} +{player.weapon_attack}**　👕 **{player.clothing}**\n"
         f"🛡️ 防御 **{display_number(player.defense)}**　💨 敏捷 **{display_number(player.agility)}**　🍀 幸运 **{display_number(player.luck)}**\n"
-        f"🧿 护符：赤牙 ×{player.merchant_charm_base_stats.get('attack', 0)} "
+        f"🪬 商人护符：赤牙 ×{player.merchant_charm_base_stats.get('attack', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('attack'))})｜"
         f"石纹 ×{player.merchant_charm_base_stats.get('defense', 0)} "
         f"(+{display_number(player.merchant_charm_bonus('defense'))})｜"
@@ -1026,16 +1033,32 @@ class CaveSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        target = (
+            school_runtime.DUNGEON_TWO_NAME
+            if self.values[0] == "endless_school"
+            else school_runtime.DUNGEON_ONE_NAME
+        )
+        active = school_runtime.active_adventure_names(
+            interaction.user.id,
+            interaction.user.display_name,
+        )
+        if active and target not in active:
+            await interaction.response.send_message(
+                f"⚔️ 你仍身处 {school_runtime.active_adventure_text(active)}，"
+                f"无法立刻进入 **{target}**。请先结束当前冒险并返回酒馆。",
+                ephemeral=True,
+            )
+            return
         if self.values[0] == "endless_school":
             await school_runtime.enter_school(interaction)
             return
-        await interaction.response.defer()
         player = store.get(interaction.user.id, interaction.user.display_name)
         sync_player_fortune(player, interaction.guild_id)
         engine.ensure_floor(player)
         player.in_adventure = True
         player.gold_storage_available = False
         store.save(player)
+        await interaction.response.defer()
         result = GameResult("🕯️ 幽灯岩窟", "你站在潮湿的石阶前，岩窟深处传来微弱的铃声……")
         await interaction.edit_original_response(
             content=None,
@@ -1149,6 +1172,8 @@ class GoldStorageModal(discord.ui.Modal):
         self.add_item(self.amount)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if await reject_tavern_service(interaction, "储值商人"):
+            return
         player = store.get(interaction.user.id, interaction.user.display_name)
         try:
             amount = int(str(self.amount.value).strip())
@@ -1191,6 +1216,9 @@ class GoldStorageView(discord.ui.View):
         self.add_item(GoldStorageActionButton("deposit"))
         self.add_item(GoldStorageActionButton("withdraw"))
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return not await reject_tavern_service(interaction, "储值商人")
+
 
 class GoldStorageButton(discord.ui.Button):
     def __init__(self):
@@ -1200,12 +1228,9 @@ class GoldStorageButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        if player.is_adventuring:
-            await interaction.response.send_message(
-                "冒险途中无法使用储值商人，请先返回酒馆。", ephemeral=True
-            )
+        if await reject_tavern_service(interaction, "储值商人"):
             return
+        player = store.get(interaction.user.id, interaction.user.display_name)
         await interaction.response.send_message(
             "# 🏦 酒馆储值商人\n"
             "这里只保管金币，不收手续费，也不产生利息。\n\n"
@@ -1278,7 +1303,7 @@ class GoldShopPanel(discord.ui.LayoutView):
         stock = daily_stock(today_key())
         container = discord.ui.Container(accent_colour=0xE0A12B)
         container.add_item(discord.ui.Section(
-            "# 🪙 金币商城开张！",
+            "# 🪙 幽灯岩窟金币商店",
             "### 只收金币，不收眼泪；买完不退，哭也没用。\n——by **酒馆老板小小秦**",
             accessory=discord.ui.Thumbnail(
                 bot.user.display_avatar.url,
@@ -1303,6 +1328,7 @@ class GoldShopPanel(discord.ui.LayoutView):
             "🍀 **幸运**：每点增加 **0.5% 超常发挥、1.5% 战后额外掉落、"
             "1.5% 真宝箱概率**；宝箱金币每点 +3%，额外药水概率每点 +2%。\n"
             "> 真宝箱基础概率 62.5%，最高 90%；各项概率均有上限，计算结果向下取整。\n"
+            "🏰 **装备归属：地下城一**｜本店武器、护具只能在地下城一装备和使用，不能带入地下城二。\n"
             f"当前金币：🪙 **{player.gold}**｜今日日期：**{today_key()}**\n"
             "可连续选择商品购买；全部买完后，再点击下方的 **返回酒馆**。"
             f"{result_text}"
@@ -1315,10 +1341,10 @@ class GoldShopPanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的金币商城面板。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的金币商城面板。", ephemeral=True)
+            return False
+        return not await reject_tavern_service(interaction, "金币商店")
 
 
 class GoldShopButton(discord.ui.Button):
@@ -1329,19 +1355,63 @@ class GoldShopButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        if player.is_adventuring:
-            await interaction.response.send_message(
-                "⚔️ 冒险途中无法使用金币商城。死亡并返回酒馆后才能再次购买。",
-                ephemeral=True,
-            )
+        if await reject_tavern_service(interaction, "金币商店"):
             return
-        shop_image = discord.File(GOLD_SHOP_IMAGE, filename="gold-shop-banner.jpg")
         await interaction.response.send_message(
-            view=GoldShopPanel(interaction.user.id, player),
-            file=shop_image,
+            "🪙 请选择幽灯岩窟或诡异学园金币商店。两个商店每日库存与装备归属彼此独立。",
+            view=GoldShopDungeonChoiceView(),
             ephemeral=True,
         )
+
+
+class GoldShopDungeonSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="选择幽灯岩窟或诡异学园金币商店……",
+            custom_id="dungeon:gold_shop_choice",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="幽灯岩窟金币商店",
+                    value="dungeon_one",
+                    description="幽灯岩窟专属装备与每日库存",
+                    emoji="🕯️",
+                ),
+                discord.SelectOption(
+                    label="诡异学园金币商店",
+                    value="dungeon_two",
+                    description="诡异学园专属装备与每日库存",
+                    emoji="🏫",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if await reject_tavern_service(interaction, "金币商店"):
+            return
+        if self.values[0] == "dungeon_two":
+            player = school_runtime.store.get(
+                interaction.user.id, interaction.user.display_name,
+            )
+            panel = school_runtime.GoldShopPanel(interaction.user.id, player)
+            image_path = school_runtime.GOLD_SHOP_IMAGE
+        else:
+            player = store.get(interaction.user.id, interaction.user.display_name)
+            panel = GoldShopPanel(interaction.user.id, player)
+            image_path = GOLD_SHOP_IMAGE
+        await interaction.response.defer()
+        await interaction.edit_original_response(
+            content=None,
+            view=panel,
+            attachments=[discord.File(image_path, filename="gold-shop-banner.jpg")],
+        )
+
+
+class GoldShopDungeonChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(GoldShopDungeonSelect())
 
 def crystal_rewards_text() -> str:
     lines = []
@@ -1460,7 +1530,8 @@ class CrystalExchangePanel(discord.ui.LayoutView):
             "📊 **单次概率：优良 45%｜稀有 35%｜黄金 17%｜传说 3%**\n"
             "可选择砸 **1 次／5 次／10 次**；多次兑换的每一件奖励独立计算概率。\n"
             "🏰 **探索途中也可以砸水晶**，不会改变当前楼层、战斗或探索进度。\n"
-            "武器和护具会放入 **酒馆装备库**，之后可自由选择穿戴；"
+            "🏰 **奖池归属：地下城一｜女巫的水晶秘藏**。\n"
+            "武器和护具会放入 **地下城一装备库**，只能在地下城一选择穿戴；"
             "护符会直接提供少量永久属性。\n"
             "兑换结果彼此独立，传说装备极其稀有。\n\n"
             f"当前水晶：🔮 **{player.crystals}**\n\n"
@@ -1507,10 +1578,10 @@ class CrystalExchangePanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的水晶兑换面板。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的水晶兑换面板。", ephemeral=True)
+            return False
+        return True
 
 
 class CrystalShopButton(discord.ui.Button):
@@ -1521,14 +1592,63 @@ class CrystalShopButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        kwargs = {"view": CrystalExchangePanel(interaction.user.id, player), "ephemeral": True}
-        if CRYSTAL_SHOP_IMAGE.exists():
-            kwargs["file"] = discord.File(
-                CRYSTAL_SHOP_IMAGE,
-                filename="crystal-exchange-banner.jpg",
+        await interaction.response.send_message(
+            "🔮 请选择要进入的水晶奖池。两个奖池的装备彼此独立。",
+            view=CrystalPoolChoiceView(),
+            ephemeral=True,
+        )
+
+
+class CrystalPoolSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="选择地下城一或地下城二水晶奖池……",
+            custom_id="dungeon:crystal_pool_choice",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="女巫的水晶秘藏",
+                    value="dungeon_one",
+                    description="地下城一独立水晶装备池",
+                    emoji="🔮",
+                ),
+                discord.SelectOption(
+                    label="神秘研究社库藏",
+                    value="dungeon_two",
+                    description="地下城二独立水晶装备池",
+                    emoji="🧪",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values[0] == "dungeon_two":
+            player = school_runtime.store.get(
+                interaction.user.id, interaction.user.display_name,
             )
-        await interaction.response.send_message(**kwargs)
+            panel = school_runtime.CrystalExchangePanel(interaction.user.id, player)
+            image_path = school_runtime.CRYSTAL_SHOP_IMAGE
+        else:
+            player = store.get(interaction.user.id, interaction.user.display_name)
+            panel = CrystalExchangePanel(interaction.user.id, player)
+            image_path = CRYSTAL_SHOP_IMAGE
+        attachments = (
+            [discord.File(image_path, filename="crystal-exchange-banner.jpg")]
+            if image_path.exists() else []
+        )
+        await interaction.response.defer()
+        await interaction.edit_original_response(
+            content=None,
+            view=panel,
+            attachments=attachments,
+        )
+
+
+class CrystalPoolChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(CrystalPoolSelect())
 
 class EquipmentInventorySelect(discord.ui.Select):
     def __init__(self, player: Player, page: int):
@@ -1596,7 +1716,8 @@ class EquipmentLibraryPanel(discord.ui.LayoutView):
         container = discord.ui.Container(accent_colour=0x5378B8)
         container.add_item(discord.ui.TextDisplay(
             "# 🧰 冒险者装备库\n"
-            "金币商店、旅行商人和水晶兑换获得的武器与护具都会收藏在这里。\n"
+            "幽灯岩窟金币商店、旅行商人和女巫的水晶秘藏获得的武器与护具都会收藏在这里。\n"
+            "这里的装备只能用于地下城一，不能带入地下城二。\n"
             "同名装备自动去重，不会重复占据下拉栏。\n\n"
             f"当前武器：⚔️ **{player.weapon}**\n"
             f"当前护具：🛡️ **{player.clothing}**\n"
@@ -1615,10 +1736,10 @@ class EquipmentLibraryPanel(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
-            return True
-        await interaction.response.send_message("这不是你的装备库。", ephemeral=True)
-        return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("这不是你的装备库。", ephemeral=True)
+            return False
+        return True
 
 
 class EquipmentLibraryButton(discord.ui.Button):
@@ -1629,13 +1750,56 @@ class EquipmentLibraryButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        ensure_equipment_inventory(player)
-        store.save(player)
         await interaction.response.send_message(
-            view=EquipmentLibraryPanel(interaction.user.id, player),
+            "🧰 请选择要打开的装备收藏。两个地下城的装备彼此独立。",
+            view=EquipmentCollectionChoiceView(),
             ephemeral=True,
         )
+
+
+class EquipmentCollectionSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="选择冒险者装备库或学生物品栏……",
+            custom_id="dungeon:equipment_collection_choice",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="冒险者装备库",
+                    value="dungeon_one",
+                    description="幽灯岩窟专属武器与护具",
+                    emoji="⚔️",
+                ),
+                discord.SelectOption(
+                    label="学生物品栏",
+                    value="dungeon_two",
+                    description="诡异学园专属学习用品与服装",
+                    emoji="🎒",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values[0] == "dungeon_two":
+            player = school_runtime.store.get(
+                interaction.user.id, interaction.user.display_name,
+            )
+            school_runtime.ensure_equipment_inventory(player)
+            school_runtime.store.save(player)
+            panel = school_runtime.EquipmentLibraryPanel(interaction.user.id, player)
+        else:
+            player = store.get(interaction.user.id, interaction.user.display_name)
+            ensure_equipment_inventory(player)
+            store.save(player)
+            panel = EquipmentLibraryPanel(interaction.user.id, player)
+        await interaction.response.edit_message(content=None, view=panel)
+
+
+class EquipmentCollectionChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(EquipmentCollectionSelect())
 
 
 class MyStatusButton(discord.ui.Button):
@@ -1646,11 +1810,58 @@ class MyStatusButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        player = store.get(interaction.user.id, interaction.user.display_name)
-        sync_player_fortune(player, interaction.guild_id)
-        engine.ensure_floor(player)
-        store.save(player)
-        await interaction.response.send_message(embed=inventory_embed(player), ephemeral=True)
+        await interaction.response.send_message(
+            "🎒 请选择要查看的个人档案。",
+            view=ProfileChoiceView(),
+            ephemeral=True,
+        )
+
+
+class ProfileSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="选择冒险者档案或学生档案……",
+            custom_id="dungeon:profile_choice",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="冒险者档案",
+                    value="dungeon_one",
+                    description="查看幽灯岩窟角色状态",
+                    emoji="🧙",
+                ),
+                discord.SelectOption(
+                    label="学生档案",
+                    value="dungeon_two",
+                    description="查看诡异学园学生状态",
+                    emoji="🧑‍🎓",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values[0] == "dungeon_two":
+            player = school_runtime.store.get(
+                interaction.user.id, interaction.user.display_name,
+            )
+            school_runtime.sync_player_fortune(player, interaction.guild_id)
+            school_runtime.engine.ensure_floor(player)
+            school_runtime.store.save(player)
+            embed = school_runtime.inventory_embed(player)
+        else:
+            player = store.get(interaction.user.id, interaction.user.display_name)
+            sync_player_fortune(player, interaction.guild_id)
+            engine.ensure_floor(player)
+            store.save(player)
+            embed = inventory_embed(player)
+        await interaction.response.edit_message(content=None, embed=embed, view=None)
+
+
+class ProfileChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(ProfileSelect())
 
 
 def daily_quest_embed(player: Player) -> discord.Embed:
@@ -1712,8 +1923,21 @@ class DailyQuestButton(discord.ui.Button):
             style=discord.ButtonStyle.success,
             custom_id=custom_id,
         )
+        self.available_in_adventure = custom_id == "dungeon:adventure_daily_quests"
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if (
+            not self.available_in_adventure
+            and await reject_tavern_service(interaction, "酒馆每日任务面板")
+        ):
+            return
+        if not self.available_in_adventure:
+            await interaction.response.send_message(
+                "📜 请选择要查看的今日任务。两个地下城分别记录进度与奖励。",
+                view=DailyTaskChoiceView(),
+                ephemeral=True,
+            )
+            return
         player = store.get(interaction.user.id, interaction.user.display_name)
         sync_daily_quests(player, today_key())
         store.save(player)
@@ -1722,6 +1946,57 @@ class DailyQuestButton(discord.ui.Button):
             view=DailyQuestClaimView(player),
             ephemeral=True,
         )
+
+
+class DailyTaskSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="选择今日冒险委托或今日布置作业……",
+            custom_id="dungeon:daily_task_choice",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label="今日冒险委托",
+                    value="dungeon_one",
+                    description="幽灯岩窟每日任务",
+                    emoji="📜",
+                ),
+                discord.SelectOption(
+                    label="今日布置作业",
+                    value="dungeon_two",
+                    description="诡异学园每日作业",
+                    emoji="📝",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.values[0] == "dungeon_two":
+            player = school_runtime.store.get(
+                interaction.user.id, interaction.user.display_name,
+            )
+            school_runtime.sync_daily_quests(player, school_runtime.today_key())
+            school_runtime.store.save(player)
+            embed = school_runtime.daily_quest_embed(player)
+            view = school_runtime.DailyQuestClaimView(player)
+        else:
+            player = store.get(interaction.user.id, interaction.user.display_name)
+            sync_daily_quests(player, today_key())
+            store.save(player)
+            embed = daily_quest_embed(player)
+            view = DailyQuestClaimView(player)
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed,
+            view=view,
+        )
+
+
+class DailyTaskChoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(DailyTaskSelect())
 
 
 class DailyQuestButtons(discord.ui.ActionRow):
@@ -1814,7 +2089,7 @@ async def ensure_entrance_panel() -> None:
 
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
-school_runtime.bind_runtime(bot, EntrancePanel)
+school_runtime.bind_runtime(bot, EntrancePanel, store)
 
 
 @bot.event

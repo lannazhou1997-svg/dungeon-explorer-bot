@@ -59,10 +59,10 @@ def test_dungeon_one_adventure_panel_does_not_repeat_daily_quests() -> None:
     assert "DungeonQuestUtilities" not in row_types
 
 
-def test_dungeon_two_adventure_panel_does_not_repeat_daily_quests() -> None:
+def test_dungeon_two_adventure_panel_includes_daily_quests() -> None:
     player = DungeonTwoPlayer(1, "手机测试", pending_event="merchant")
 
     panel = dungeon_two.DungeonPanel(1, player, None)
     row_types = {type(item).__name__ for item in panel.children[0].children}
 
-    assert "DungeonQuestUtilities" not in row_types
+    assert "DungeonQuestUtilities" in row_types

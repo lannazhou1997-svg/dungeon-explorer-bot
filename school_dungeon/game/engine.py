@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .formatting import format_number
 from .models import Enemy, Player, merchant_charm_bonuses, merchant_charm_rate, merchant_charm_total
 from .equipment import register_equipment
-from .questions import draw_question
+from .questions import draw_character_question, draw_question
 from .school_content import (
     FINAL_BOSS_ALIAS,
     MAJOR_BOSS_NAMES,
@@ -39,34 +39,34 @@ class GameEngine:
               ["fairy"] * 5 + ["mystery"] * 6 + ["treasure_map"] * 5 +
               ["trapped_beast"] * 5 + ["wishing_well"] * 4 + ["empty"] * 8)
     MAGIC_SKILLS = {
-        "minor": ("✨ 星火弹", 6, 1.20),
-        "medium": ("🔷 月辉矢", 12, 1.50),
-        "major": ("🌠 奥术流星", 22, 1.85),
+        "minor": ("✨ 学识火花", 6, 1.20),
+        "medium": ("🔷 灵感光矢", 12, 1.50),
+        "major": ("🌠 真理星雨", 22, 1.85),
     }
     MAJOR_BOSS_NAMES = MAJOR_BOSS_NAMES
     MERCHANT_ITEMS = {
-        "healing_potion": ("治疗药水", "药剂", "恢复 35 点体力", 25, {}),
-        "mana_potion": ("魔力药水", "药剂", "恢复 25 点魔力", 30, {}),
-        "energy_potion": ("精力药水", "药剂", "恢复 30 点精力", 35, {}),
-        "greater_energy_potion": ("强效精力药水", "药剂", "恢复 60 点精力（20层后出现）", 85, {}),
-        "greater_healing_potion": ("强效治疗药水", "药剂", "恢复 60 点体力", 58, {}),
-        "greater_mana_potion": ("强效魔力药水", "药剂", "恢复 50 点魔力", 72, {}),
-        "guard_charm": ("石纹护符", "护符", "永久防御 +1", 115, {"defense": 1}),
-        "lucky_charm": ("四叶护符", "护符", "永久幸运 +1", 135, {"luck": 1}),
-        "swift_charm": ("风羽护符", "护符", "永久敏捷 +1", 125, {"agility": 1}),
-        "fang_charm": ("赤牙护符", "护符", "永久攻击 +1", 155, {"attack": 1}),
-        "iron_sword": ("旅行者铁剑", "武器", "攻击 +8", 210, {"attack": 8}),
-        "wind_blade": ("风痕弯刀", "武器", "攻击 +11｜敏捷 +1", 390, {"attack": 11, "agility": 1}),
-        "ember_hammer": ("余烬战锤", "武器", "攻击 +13｜敏捷 +1", 460, {"attack": 13, "agility": 1}),
-        "tide_staff": ("潮音法杖", "武器", "攻击 +15｜幸运 +2", 590, {"attack": 15, "luck": 2}),
-        "gear_spear": ("发条破甲枪", "武器", "攻击 +17｜敏捷 +2", 760, {"attack": 17, "agility": 2}),
-        "frost_blades": ("霜牙双刃", "武器", "攻击 +20｜敏捷 +3", 980, {"attack": 20, "agility": 3}),
-        "leather_armor": ("硬皮旅行甲", "装备", "防御 +4｜敏捷 +1", 195, {"defense": 4, "agility": 1}),
-        "rune_cloak": ("旧符文披风", "装备", "防御 +6｜幸运 +1", 370, {"defense": 6, "luck": 1}),
-        "moss_coat": ("苔纹游侠衣", "装备", "防御 +5｜敏捷 +3", 420, {"defense": 5, "agility": 3}),
-        "tide_robe": ("潮汐祭衣", "装备", "防御 +7｜幸运 +2", 560, {"defense": 7, "luck": 2}),
-        "clock_armor": ("钟摆机关甲", "装备", "防御 +10｜敏捷 +2", 760, {"defense": 10, "agility": 2}),
-        "frost_cape": ("霜冠王披", "装备", "防御 +13｜幸运 +3", 990, {"defense": 13, "luck": 3}),
+        "healing_potion": ("学生牛奶", "药剂", "恢复 35 点体力", 25, {}),
+        "mana_potion": ("清凉油", "药剂", "恢复 25 点精神力", 30, {}),
+        "energy_potion": ("运动饮料", "药剂", "恢复 30 点精力", 35, {}),
+        "greater_energy_potion": ("安神补脑液", "药剂", "恢复 60 点精力（20层后出现）", 85, {}),
+        "greater_healing_potion": ("校园营养餐", "药剂", "恢复 60 点体力", 58, {}),
+        "greater_mana_potion": ("强劲薄荷糖", "药剂", "恢复 50 点精神力", 72, {}),
+        "guard_charm": ("科创竞赛加分", "护符", "永久防御 +1", 115, {"defense": 1}),
+        "lucky_charm": ("人文竞赛加分", "护符", "永久幸运 +1", 135, {"luck": 1}),
+        "swift_charm": ("体育竞赛加分", "护符", "永久敏捷 +1", 125, {"agility": 1}),
+        "fang_charm": ("学科竞赛加分", "护符", "永久攻击 +1", 155, {"attack": 1}),
+        "iron_sword": ("老式金属直尺", "武器", "攻击 +8", 210, {"attack": 8}),
+        "wind_blade": ("美工刀", "武器", "攻击 +11｜敏捷 +1", 390, {"attack": 11, "agility": 1}),
+        "ember_hammer": ("实验锤", "武器", "攻击 +13｜敏捷 +1", 460, {"attack": 13, "agility": 1}),
+        "tide_staff": ("指挥棒", "武器", "攻击 +15｜幸运 +2", 590, {"attack": 15, "luck": 2}),
+        "gear_spear": ("订书机", "武器", "攻击 +17｜敏捷 +2", 760, {"attack": 17, "agility": 2}),
+        "frost_blades": ("剪刀", "武器", "攻击 +20｜敏捷 +3", 980, {"attack": 20, "agility": 3}),
+        "leather_armor": ("耐磨校服外套", "装备", "防御 +4｜敏捷 +1", 195, {"defense": 4, "agility": 1}),
+        "rune_cloak": ("二手校服外套", "装备", "防御 +6｜幸运 +1", 370, {"defense": 6, "luck": 1}),
+        "moss_coat": ("园艺服", "装备", "防御 +5｜敏捷 +3", 420, {"defense": 5, "agility": 3}),
+        "tide_robe": ("游泳队服", "装备", "防御 +7｜幸运 +2", 560, {"defense": 7, "luck": 2}),
+        "clock_armor": ("化学实验服", "装备", "防御 +10｜敏捷 +2", 760, {"defense": 10, "agility": 2}),
+        "frost_cape": ("冬季加厚校服", "装备", "防御 +13｜幸运 +3", 990, {"defense": 13, "luck": 3}),
     }
     MERCHANT_POOLS = {
         "药剂": [
@@ -93,7 +93,7 @@ class GameEngine:
 
     @staticmethod
     def event_damage(player: Player, raw_damage: int) -> int:
-        """敏捷与防御共同减少探索事件造成的生命或魔力损失。"""
+        """敏捷与防御共同减少探索事件造成的生命或精神力损失。"""
         return round(max(1, raw_damage - player.agility // 2 - player.defense // 3), 2)
 
     @staticmethod
@@ -105,6 +105,54 @@ class GameEngine:
     def star_multipliers(star: int) -> tuple[float, float, float]:
         star = max(0, star)
         return 1 + 0.50 * star, 1 + 0.30 * star, 1 + 0.15 * star
+
+    @staticmethod
+    def school_difficulty_multipliers(floor: int) -> tuple[float, float]:
+        """无玩家数据时使用的静态备用曲线，差距随楼层平滑扩大。"""
+        floor = max(1, min(100, floor))
+        progress = (floor - 1) / 99
+        return 1.04 + 0.16 * progress, 1.03 + 0.12 * progress
+
+    @staticmethod
+    def expected_player_hit(player: Player) -> float:
+        """按普通攻击上下限的中点估算玩家单次稳定输出。"""
+        level = max(1, player.level)
+        return round(max(1.0, 10 + level * 2.5 + player.attack_bonus), 2)
+
+    @classmethod
+    def adaptive_enemy_stats(
+        cls,
+        player: Player,
+        floor: int,
+        enemy_kind: str,
+    ) -> tuple[int, int]:
+        """按玩家当前战力生成一次性锁定的敌人生命与原始攻击。"""
+        floor = max(1, min(100, floor))
+        progress = (floor - 1) / 99
+        target_rounds = {
+            "normal": (2.5, 4.0),
+            "mimic": (3.5, 5.0),
+            "small_boss": (6.0, 8.0),
+            "major_boss": (8.0, 12.0),
+        }
+        survival_hits = {
+            "normal": (11.0, 9.0),
+            "mimic": (10.0, 8.0),
+            "small_boss": (9.0, 7.0),
+            "major_boss": (8.0, 6.0),
+        }
+        start_rounds, end_rounds = target_rounds[enemy_kind]
+        start_hits, end_hits = survival_hits[enemy_kind]
+        rounds = start_rounds + (end_rounds - start_rounds) * progress
+        hits = start_hits + (end_hits - start_hits) * progress
+        hp = max(1, round(cls.expected_player_hit(player) * rounds))
+
+        # 反推原始攻击，使扣除防御后的平均伤害接近最大体力÷目标承伤次数。
+        target_damage = max(1.0, player.max_hp / hits)
+        raw_from_defense = player.defense + target_damage
+        raw_from_damage_floor = target_damage / 0.15
+        attack = max(6, round(min(raw_from_defense, raw_from_damage_floor)))
+        return int(hp), int(attack)
 
     @staticmethod
     def chest_chance(player: Player) -> float:
@@ -132,7 +180,7 @@ class GameEngine:
         base_chance: float,
         fortune_growth: float = 0.0,
     ) -> float:
-        """1—30 层提供 1.5 倍概率；精灵水晶再受当日运势比例增长。"""
+        """1—30 层提供 1.5 倍概率；新生谢礼水晶再受当日运势比例增长。"""
         floor_multiplier = 1.5 if floor <= 30 else 1.0
         return min(1.0, base_chance * floor_multiplier * (1 + max(0.0, fortune_growth)))
 
@@ -178,12 +226,12 @@ class GameEngine:
     @staticmethod
     def adventurer_title(completion_count: int) -> str:
         titles = {
-            1: "❄️ 一星冒险者",
-            2: "❄️ 二星冒险者",
-            3: "❄️ 三星冒险者",
-            4: "❄️ 四星冒险者",
+            1: "❄️ 一星学生",
+            2: "❄️ 二星学生",
+            3: "❄️ 三星学生",
+            4: "❄️ 四星学生",
         }
-        return titles.get(max(1, completion_count), "❄️ 初级冒险者")
+        return titles.get(max(1, completion_count), "❄️ 优秀学生")
 
     def ensure_floor(self, player: Player) -> None:
         if player.required_steps <= 0:
@@ -192,9 +240,9 @@ class GameEngine:
             if player.enemy.name in self.MAJOR_BOSS_NAMES.values():
                 return
             if player.floor % 10 != 0:
-                player.enemy = self._make_boss(player.floor, player.completion_count)
+                player.enemy = self._make_boss(player.floor, player.completion_count, player)
             else:
-                expected = self._make_boss(player.floor, player.completion_count)
+                expected = self._make_boss(player.floor, player.completion_count, player)
                 if player.enemy.name != expected.name:
                     player.enemy.name = expected.name
                     player.enemy.catchphrase = expected.catchphrase
@@ -215,10 +263,10 @@ class GameEngine:
         if player.steps >= player.required_steps:
             position = player.floor % 10
             if position == 0:
-                player.enemy = self._make_boss(player.floor, player.completion_count)
+                player.enemy = self._make_boss(player.floor, player.completion_count, player)
                 return GameResult("🔥 大 Boss 降临！", f"固定守层者 **{player.enemy.name}** 挡住了通往下一区域的道路！", True)
             if position in {5, 6, 7, 8} and self.rng.random() < 0.45:
-                player.enemy = self._make_boss(player.floor, player.completion_count)
+                player.enemy = self._make_boss(player.floor, player.completion_count, player)
                 return GameResult("⚠️ 小 Boss 随机出现！", f"**{player.enemy.name}** 闻讯赶来，决定亲自阻止你！", True)
             cleared = player.floor
             player.floor += 1
@@ -245,7 +293,7 @@ class GameEngine:
             skill_tier = "medium"
         skill = self.MAGIC_SKILLS.get(skill_tier) if skill_tier else None
         if skill and player.mp < skill[1]:
-            return GameResult("魔力不足", f"释放 **{skill[0]}** 需要 {skill[1]} 点魔力。")
+            return GameResult("精神力不足", f"使用 **{skill[0]}** 需要 {skill[1]} 点精神力。")
         base_min = 8 + player.level * 2
         base_max = 12 + player.level * 3
         base_damage = self.rng.randint(base_min, base_max)
@@ -268,7 +316,7 @@ class GameEngine:
         formula = (
             f"（基础 {base_damage} + 武器 {player.weapon_attack}"
             f" + 百层祝福 {format_number(player.completion_bonus('attack'))}"
-            f" + 商人护符 {format_number(player.merchant_charm_bonus('attack'))}"
+            f" + 竞赛加分 {format_number(player.merchant_charm_bonus('attack'))}"
             f" + 水晶护符 {format_number(player.crystal_charm_bonus('attack'))}）"
         )
         previous_hp = enemy.hp
@@ -297,7 +345,7 @@ class GameEngine:
                 player.gold += reclaimed_gold
             bonus_drop = ""
             if self.rng.random() < min(0.35, player.luck * 0.015):
-                item = self.rng.choice(("治疗药水", "魔力药水", "精力药水"))
+                item = self.rng.choice(("学生牛奶", "清凉油", "运动饮料"))
                 player.consumables[item] = player.consumables.get(item, 0) + 1
                 bonus_drop = f"，幸运额外掉落 **{item} ×1**"
             equipment_drop = ""
@@ -352,16 +400,16 @@ class GameEngine:
                     player.gold_storage_available = True
                     awarded_title = self.adventurer_title(next_star)
                     return GameResult(
-                        "❄️ 百层远征完成",
+                        "❄️ 百层学园探索完成",
                         f"你以{label}造成 **{format_number(damage)}** 点伤害{performance} {formula}，"
                         f"击败 **{enemy.name}**！\n获得 {exp} 经验和 {reward_gold} 金币"
                         f"{bonus_drop}。{equipment_drop}{level_text}\n\n"
                         "你通过了永不下课学园第 **100 层**，获得称号身份组 "
                         f"**{awarded_title}**！\n"
                         "永久属性提升：⚔️ **攻击 +5**｜🛡️ **防御 +3**。\n"
-                        f"下一轮远征提升为 **★{next_star}**；"
+                        f"下一轮探索提升为 **★{next_star}**；"
                         "等级和经验已重置，装备、收藏与永久属性保留。\n"
-                        "风雪将你送回了冒险者酒馆。",
+                        "校钟将你送回了酒馆。",
                         completed=True,
                         awarded_title=awarded_title,
                     )
@@ -384,7 +432,7 @@ class GameEngine:
             if not player.is_alive:
                 return self._die(player, spell_result)
             return GameResult(
-                "🔮 敌方魔法发动！",
+                "🔮 敌方招式发动！",
                 f"你以{label}造成 **{format_number(damage)}** 点伤害{shield_text}{performance} {formula}；\n"
                 f"{spell_result}",
                 True,
@@ -399,10 +447,10 @@ class GameEngine:
         if self.rng.random() < spell_chance:
             enemy.charged_spell = self._spell_name(enemy)
             return GameResult(
-                "⚠️ 敌人正在咏唱！",
+                "⚠️ 敌人正在准备招式！",
                 f"你以{label}造成 **{format_number(damage)}** 点伤害{shield_text}{performance} {formula}。\n"
                 f"**{enemy.name}** 正在准备 **{enemy.charged_spell}**；"
-                "下一次行动将释放魔法！",
+                "下一次行动将发动招式！",
                 True,
             )
 
@@ -473,7 +521,11 @@ class GameEngine:
             return None
         enemy.quiz_triggers_done.append(threshold)
         subject = self._quiz_subject(enemy, threshold)
-        question = draw_question(subject, player.recent_question_keys, self.rng)
+        if enemy.floor >= 60:
+            question = draw_character_question(player.recent_question_keys, self.rng)
+            subject = str(question["subject"])
+        else:
+            question = draw_question(subject, player.recent_question_keys, self.rng)
         player.recent_question_keys.append(str(question["key"]))
         player.recent_question_keys = player.recent_question_keys[-100:]
         deadline = time.time() + 10
@@ -565,7 +617,7 @@ class GameEngine:
             player.mp -= drained
             healed = min(enemy.max_hp - enemy.hp, max(1, drained * 2))
             enemy.hp += healed
-            return f"🌍 **板块震荡**夺走 **{drained} 魔力**，并为敌人恢复 **{healed} 生命**。"
+            return f"🌍 **板块震荡**夺走 **{drained} 精神力**，并为敌人恢复 **{healed} 生命**。"
         if spell == "标准答案":
             healed = min(enemy.max_hp - enemy.hp, max(1, enemy.max_hp // 8))
             enemy.hp += healed
@@ -596,13 +648,13 @@ class GameEngine:
         player.hp = round(max(0, player.hp - damage), 2)
         extras = []
         if drained_mp:
-            extras.append(f"魔力 -{drained_mp}")
+            extras.append(f"精神力 -{drained_mp}")
         if drained_energy:
             extras.append(f"精力 -{drained_energy}")
         extra_text = f"，{'、'.join(extras)}" if extras else ""
         return (
-            f"{emoji} **{enemy.name}** 释放 **{spell}**，造成 **{damage} 点魔法伤害**"
-            f"{extra_text}。魔法会穿透大部分防御。"
+            f"{emoji} **{enemy.name}** 发动 **{spell}**，造成 **{damage} 点招式伤害**"
+            f"{extra_text}。招式会穿透大部分防御。"
         )
 
     def interact_event(self, player: Player) -> GameResult:
@@ -617,7 +669,7 @@ class GameEngine:
         if event == "mimic":
             player.pending_event = None
             player.enemy = self._make_monster(
-                player.floor, mimic=True, star=player.completion_count
+                player.floor, mimic=True, star=player.completion_count, player=player
             )
             return GameResult(
                 "😈 书包突然张嘴了！",
@@ -634,15 +686,15 @@ class GameEngine:
             player.energy += energy
             return GameResult(
                 "🏥 校医室让你恢复了精神！",
-                f"恢复 **{hp} 体力、{mp} 魔力、{energy} 精力**。",
+                f"恢复 **{hp} 体力、{mp} 精神力、{energy} 精力**。",
             )
         if event == "fairy":
             player.pending_event = None
-            item = "治疗药水"
+            item = "学生牛奶"
             if player.consumables.get(item, 0) <= 0:
                 return GameResult(
                     "🧑‍🎓 新生有点失望",
-                    "你翻遍行囊也没有找到治疗药水。她抱着空白作业本离开了。",
+                    "你翻遍行囊也没有找到学生牛奶。她抱着空白作业本离开了。",
                 )
             player.consumables[item] -= 1
             reward_roll = self.rng.random()
@@ -662,7 +714,7 @@ class GameEngine:
                 )
                 player.gold += gold
                 reward = f"**{gold} 金币**"
-            return GameResult("🧑‍🎓 新生的谢礼", f"交出 **治疗药水 ×1**，获得{reward}。")
+            return GameResult("🧑‍🎓 新生的谢礼", f"交出 **学生牛奶 ×1**，获得{reward}。")
         if event == "mystery":
             player.pending_event = None
             outcome = self.rng.choice(("heal", "hurt", "battle", "gold"))
@@ -678,7 +730,7 @@ class GameEngine:
                 return GameResult("🪙 荣誉榜掉出金币", f"相框背后滑出 **{gold} 金币**。")
             if outcome == "battle":
                 player.enemy = self._make_monster(
-                    player.floor, star=player.completion_count
+                    player.floor, star=player.completion_count, player=player
                 )
                 return GameResult("👾 荣誉榜叫来了值日生！", f"**{player.enemy.name}** 从暗门里冲了出来！", True)
             damage = self.event_damage(player, 12 + player.floor // 2)
@@ -697,7 +749,7 @@ class GameEngine:
                 return GameResult("🔮 答案纸指向的秘宝", "你找到了极其稀有的 **魔法水晶 ×1**！")
             if roll < 0.28 + crystal_chance - 0.03:
                 player.enemy = self._make_monster(
-                    player.floor, mimic=True, star=player.completion_count
+                    player.floor, mimic=True, star=player.completion_count, player=player
                 )
                 return GameResult("😈 答案纸是书包怪的点名单！", f"**{player.enemy.name}** 已经等候多时！", True)
             gold = self.blended_gold(
@@ -718,12 +770,12 @@ class GameEngine:
                 return GameResult("🐾 吉祥物受惊了！", f"它误咬了你一口，失去 **{damage} 点体力**，随后逃进走廊。", True)
             if roll < 0.35:
                 player.enemy = self._make_monster(
-                    player.floor, star=player.completion_count
+                    player.floor, star=player.completion_count, player=player
                 )
                 return GameResult("👾 器材室管理员回来了！", f"**{player.enemy.name}** 把你当成了入侵者！", True)
-            item_pool = ["治疗药水", "魔力药水", "精力药水"]
+            item_pool = ["学生牛奶", "清凉油", "运动饮料"]
             if player.floor >= 20:
-                item_pool.append("强效精力药水")
+                item_pool.append("安神补脑液")
             item = self.rng.choice(item_pool)
             player.consumables[item] = player.consumables.get(item, 0) + 1
             return GameResult("🐾 吉祥物记住了你的气味", f"它叼来 **{item} ×1** 作为谢礼，然后摇着尾巴离开了。")
@@ -750,8 +802,8 @@ class GameEngine:
         player.gold += gold
         extra = ""
         if self.rng.random() < min(0.65, 0.25 + player.luck * 0.02):
-            player.consumables["治疗药水"] = player.consumables.get("治疗药水", 0) + 1
-            extra = "，以及一瓶治疗药水"
+            player.consumables["学生牛奶"] = player.consumables.get("学生牛奶", 0) + 1
+            extra = "，以及一盒学生牛奶"
         return GameResult("🗄️ 储物柜开启！", f"消耗 2 点精力，获得 **{gold} 金币**{extra}。")
 
     def decline_event(self, player: Player) -> GameResult:
@@ -771,7 +823,7 @@ class GameEngine:
                     "那只可疑书包没有发现你，仍在原地耐心装死。",
                 )
             player.enemy = self._make_monster(
-                player.floor, mimic=True, star=player.completion_count
+                player.floor, mimic=True, star=player.completion_count, player=player
             )
             return GameResult(
                 "😈 书包怪识破了你！",
@@ -1003,53 +1055,83 @@ class GameEngine:
             f"本次刷新 **{player.merchant_refreshes}/5**。",
         )
 
+    def convert_potions(self, player: Player) -> GameResult:
+        """按金币售价向上取整，以三份普通补给合成一份强化补给。"""
+        recipes = (
+            ("学生牛奶", "校园营养餐"),
+            ("清凉油", "强劲薄荷糖"),
+            ("运动饮料", "安神补脑液"),
+        )
+        converted: list[str] = []
+        for normal_name, greater_name in recipes:
+            normal_count = max(0, player.consumables.get(normal_name, 0))
+            batches = normal_count // 3
+            if batches <= 0:
+                continue
+            player.consumables[normal_name] = normal_count - batches * 3
+            player.consumables[greater_name] = (
+                player.consumables.get(greater_name, 0) + batches
+            )
+            converted.append(
+                f"{normal_name} **{batches * 3}** 份 → {greater_name} **{batches}** 份"
+            )
+        if not converted:
+            return GameResult(
+                "可合成的补给不足",
+                "每种强化补给需要同类普通补给 **3 份**；现有数量不足。",
+            )
+        return GameResult(
+            "🧪 补给合成完成",
+            "\n".join(converted) + "\n不足 3 份的普通补给已保留。",
+        )
+
     def use_potion(self, player: Player) -> GameResult:
         if player.energy < 2:
-            return GameResult("精力不足", "喝治疗药水也需要 **2 点精力**；请使用精力药水或呼叫救援。")
-        greater_count = player.consumables.get("强效治疗药水", 0)
+            return GameResult("精力不足", "食用校园营养餐或饮用学生牛奶需要 **2 点精力**；请使用恢复精力的补给或呼叫救援。")
+        greater_count = player.consumables.get("校园营养餐", 0)
         if greater_count > 0 and player.hp < player.max_hp:
             healed = min(60, player.max_hp - player.hp)
             player.hp += healed
-            player.consumables["强效治疗药水"] = greater_count - 1
+            player.consumables["校园营养餐"] = greater_count - 1
             player.energy -= 2
-            return GameResult("🧪 使用强效治疗药水", f"消耗 **2 精力**，恢复 **{healed} 点体力**。")
-        count = player.consumables.get("治疗药水", 0)
+            return GameResult("🍱 食用校园营养餐", f"消耗 **2 精力**，恢复 **{healed} 点体力**。")
+        count = player.consumables.get("学生牛奶", 0)
         if count <= 0:
-            return GameResult("没有药水", "你的道具栏中没有治疗药水。")
+            return GameResult("没有体力补给", "你的道具栏中没有学生牛奶或校园营养餐。")
         if player.hp >= player.max_hp:
             return GameResult("无需治疗", "你的体力已经全满。")
         healed = min(35, player.max_hp - player.hp)
         player.hp += healed
-        player.consumables["治疗药水"] = count - 1
+        player.consumables["学生牛奶"] = count - 1
         player.energy -= 2
-        return GameResult("使用道具", f"消耗 **2 精力**，恢复了 {healed} 点体力。")
+        return GameResult("🥛 饮用学生牛奶", f"消耗 **2 精力**，恢复了 {healed} 点体力。")
 
     def use_mana_potion(self, player: Player) -> GameResult:
         if player.energy < 2:
-            return GameResult("精力不足", "喝魔力药水也需要 **2 点精力**；请使用精力药水或呼叫救援。")
-        greater_count = player.consumables.get("强效魔力药水", 0)
+            return GameResult("精力不足", "使用清凉油或食用强劲薄荷糖需要 **2 点精力**；请使用恢复精力的补给或呼叫救援。")
+        greater_count = player.consumables.get("强劲薄荷糖", 0)
         if greater_count > 0 and player.mp < player.max_mp:
             restored = min(50, player.max_mp - player.mp)
             player.mp += restored
-            player.consumables["强效魔力药水"] = greater_count - 1
+            player.consumables["强劲薄荷糖"] = greater_count - 1
             player.energy -= 2
             return GameResult(
-                "💧 使用强效魔力药水",
-                f"消耗 **2 精力**，恢复 **{restored} 点魔力**。",
+                "🍬 食用强劲薄荷糖",
+                f"消耗 **2 精力**，恢复 **{restored} 点精神力**。",
             )
-        count = player.consumables.get("魔力药水", 0)
+        count = player.consumables.get("清凉油", 0)
         if count <= 0:
-            return GameResult("没有魔力药水", "你的道具栏中没有魔力药水。")
+            return GameResult("没有精神力补给", "你的道具栏中没有清凉油或强劲薄荷糖。")
         if player.mp >= player.max_mp:
-            return GameResult("魔力已满", "你现在不需要使用魔力药水。")
+            return GameResult("精神力已满", "你现在不需要使用精神力补给。")
         restored = min(25, player.max_mp - player.mp)
         player.mp += restored
-        player.consumables["魔力药水"] = count - 1
+        player.consumables["清凉油"] = count - 1
         player.energy -= 2
-        return GameResult("💧 使用魔力药水", f"消耗 **2 精力**，恢复 **{restored} 点魔力**。")
+        return GameResult("🧴 使用清凉油", f"消耗 **2 精力**，恢复 **{restored} 点精神力**。")
 
     def use_energy_potion(self, player: Player) -> GameResult:
-        greater_count = player.consumables.get("强效精力药水", 0)
+        greater_count = player.consumables.get("安神补脑液", 0)
         if greater_count > 0 and player.energy < player.max_energy:
             space = player.max_energy - player.energy
             if space <= 2:
@@ -1057,26 +1139,26 @@ class GameEngine:
             restored = min(60, space)
             net = restored - 2
             player.energy += net
-            player.consumables["强效精力药水"] = greater_count - 1
+            player.consumables["安神补脑液"] = greater_count - 1
             return GameResult(
-                "⚡ 使用强效精力药水",
-                f"药效恢复 **{restored} 精力**，饮用消耗 **2 精力**，实际增加 **{net}**。",
+                "🧠 饮用安神补脑液",
+                f"补给恢复 **{restored} 精力**，饮用消耗 **2 精力**，实际增加 **{net}**。",
             )
-        count = player.consumables.get("精力药水", 0)
+        count = player.consumables.get("运动饮料", 0)
         if count <= 0:
-            return GameResult("没有精力药水", "你的道具栏中没有精力药水。")
+            return GameResult("没有精力补给", "你的道具栏中没有运动饮料或安神补脑液。")
         if player.energy >= player.max_energy:
-            return GameResult("精力已满", "你现在不需要使用精力药水。")
+            return GameResult("精力已满", "你现在不需要使用精力补给。")
         space = player.max_energy - player.energy
         if space <= 2:
             return GameResult("精力接近全满", "至少空出 **3 点精力**再饮用，避免浪费药效。")
         restored = min(30, space)
         net = restored - 2
         player.energy += net
-        player.consumables["精力药水"] = count - 1
+        player.consumables["运动饮料"] = count - 1
         return GameResult(
-            "⚡ 使用精力药水",
-            f"药效恢复 **{restored} 精力**，饮用消耗 **2 精力**，实际增加 **{net}**。",
+            "🥤 饮用运动饮料",
+            f"补给恢复 **{restored} 精力**，饮用消耗 **2 精力**，实际增加 **{net}**。",
         )
 
     def request_rescue(self, player: Player) -> GameResult:
@@ -1086,10 +1168,10 @@ class GameEngine:
         if player.energy >= 3:
             return GameResult("还不需要救援", "你仍有足够精力继续探索。")
         if (
-            player.consumables.get("精力药水", 0) > 0
-            or player.consumables.get("强效精力药水", 0) > 0
+            player.consumables.get("运动饮料", 0) > 0
+            or player.consumables.get("安神补脑液", 0) > 0
         ):
-            return GameResult("行囊里还有补给", "先使用一瓶精力药水就能继续前进。")
+            return GameResult("行囊里还有补给", "先使用一份精力补给就能继续前进。")
         return GameResult(
             "🛺 地下城紧急脱困",
             "远处传来车铃声，鼹鼠车夫停在了你面前；与此同时，"
@@ -1101,8 +1183,8 @@ class GameEngine:
         """按死亡方式结算，但由车夫安全送回酒馆。"""
         if (
             player.enemy or player.energy >= 3
-            or player.consumables.get("精力药水", 0) > 0
-            or player.consumables.get("强效精力药水", 0) > 0
+            or player.consumables.get("运动饮料", 0) > 0
+            or player.consumables.get("安神补脑液", 0) > 0
         ):
             return self.request_rescue(player)
 
@@ -1137,11 +1219,11 @@ class GameEngine:
         return GameResult(
             "🛺 鼹鼠车夫紧急救援",
             f"你在第 **{old_floor} 层**点亮求救灯。路过的鼹鼠车夫发现了你，"
-            "随后把你安全送回冒险者酒馆。\n"
+            "随后把你安全送回酒馆。\n"
             f"等级、经验和层数已重置；普通道具随机只保留：**{kept_text}**。"
             f"金币由 **{original_gold}** 减少为 **{player.gold}**；"
             "装备、魔法水晶和永久加成保留。\n"
-            "你已恢复为 **Lv.1**，体力、魔力和精力全部补满。",
+            "你已恢复为 **Lv.1**，体力、精神力和精力全部补满。",
             escaped=True,
         )
 
@@ -1149,8 +1231,8 @@ class GameEngine:
         """放弃本次等级与经验，从地下城一层重新开始，不返回酒馆。"""
         if (
             player.enemy or player.energy >= 3
-            or player.consumables.get("精力药水", 0) > 0
-            or player.consumables.get("强效精力药水", 0) > 0
+            or player.consumables.get("运动饮料", 0) > 0
+            or player.consumables.get("安神补脑液", 0) > 0
         ):
             return self.request_rescue(player)
         old_level, old_exp, old_floor = player.level, player.exp, player.floor
@@ -1189,7 +1271,7 @@ class GameEngine:
             player.energy = min(player.max_energy, player.energy + 12)
             levels += 1
         return (
-            f"\n提升了 {levels} 级，体力 +24、魔力 +10、精力 +12！"
+            f"\n提升了 {levels} 级，体力 +24、精神力 +10、精力 +12！"
             if levels else ""
         )
 
@@ -1229,8 +1311,9 @@ class GameEngine:
         floor: int,
         mimic: bool = False,
         star: int = 0,
+        player: Player | None = None,
     ) -> Enemy:
-        # 1—9 层保留新手缓冲，10 层后成长逐渐加快。
+        # 保留原成长曲线，再叠加地下城二专属难度。
         scale = 1 + floor * 0.11 + max(0, floor - 10) * 0.006
         mimic_name = f"{topic_for_floor(floor)}·会咬人的书包"
         name = mimic_name if mimic else self.rng.choice(monster_names_for_floor(floor))
@@ -1239,9 +1322,15 @@ class GameEngine:
         }
         lines.setdefault(name, f"{name}撕碎了课表，摆出准备抽查的架势！")
         hp_multiplier, attack_multiplier, reward_multiplier = self.star_multipliers(star)
-        hp = int((48 if mimic else 38) * scale * hp_multiplier)
+        school_hp, school_attack = self.school_difficulty_multipliers(floor)
         level = max(1, floor + self.rng.randint(-1, 1))
-        attack = max(6, int(9 * scale * attack_multiplier))
+        if player is None:
+            hp = int((48 if mimic else 38) * scale * hp_multiplier * school_hp)
+            attack = max(6, int(9 * scale * attack_multiplier * school_attack))
+        else:
+            hp, attack = self.adaptive_enemy_stats(
+                player, floor, "mimic" if mimic else "normal"
+            )
         exp = int((18 + floor * 3) * reward_multiplier)
         return Enemy(
             name, hp, hp, attack, exp,
@@ -1249,17 +1338,28 @@ class GameEngine:
             floor=floor, adventure_star=star,
         )
 
-    def _make_boss(self, floor: int, star: int = 0) -> Enemy:
+    def _make_boss(
+        self,
+        floor: int,
+        star: int = 0,
+        player: Player | None = None,
+    ) -> Enemy:
         major = floor % 10 == 0
         scale = 1 + floor * 0.13 + max(0, floor - 10) * 0.007
         hp_multiplier, attack_multiplier, reward_multiplier = self.star_multipliers(star)
-        hp = int((115 if major else 78) * scale * hp_multiplier)
+        school_hp, school_attack = self.school_difficulty_multipliers(floor)
         name = self.MAJOR_BOSS_NAMES.get(floor, f"第{floor}层统考") if major else small_boss_name_for_floor(floor)
         lines: dict[str, str] = {}
         if floor == 100:
             lines[name] = "考试可以补考，但你只有一条命。"
         lines.setdefault(name, f"我是 **{name}**，想下课就先通过我的抽查！")
-        attack = int((16 if major else 12) * scale * attack_multiplier)
+        if player is None:
+            hp = int((115 if major else 78) * scale * hp_multiplier * school_hp)
+            attack = int((16 if major else 12) * scale * attack_multiplier * school_attack)
+        else:
+            hp, attack = self.adaptive_enemy_stats(
+                player, floor, "major_boss" if major else "small_boss"
+            )
         exp = int((80 + floor * (10 if major else 6)) * reward_multiplier)
         return Enemy(
             name, hp, hp, attack, exp,
@@ -1272,7 +1372,7 @@ class GameEngine:
 
     def _event_monster(self, player: Player) -> GameResult:
         player.enemy = self._make_monster(
-            player.floor, star=player.completion_count
+            player.floor, star=player.completion_count, player=player
         )
         return GameResult(
             "⚠️ 你遇到了怪物！",
@@ -1282,11 +1382,11 @@ class GameEngine:
 
     def _event_mimic(self, player: Player) -> GameResult:
         player.pending_event = "mimic"
-        return GameResult("🎒 你发现了无人认领的书包", "拉链缝里传来文具碰撞声。打开后可能获得金币、药水，也可能被它咬住。")
+        return GameResult("🎒 你发现了无人认领的书包", "拉链缝里传来文具碰撞声。打开后可能获得金币、校园补给，也可能被它咬住。")
 
     def _event_chest(self, player: Player) -> GameResult:
         player.pending_event = "chest"
-        return GameResult("🗄️ 你发现了上锁的储物柜", "柜门后传来轻轻的碰撞声。打开后可能获得金币、药水或其他物品。")
+        return GameResult("🗄️ 你发现了上锁的储物柜", "柜门后传来轻轻的碰撞声。打开后可能获得金币、校园补给或其他物品。")
 
     def _event_trap(self, player: Player) -> GameResult:
         raw_damage = self.rng.randint(5, 12) + player.floor // 3
@@ -1299,7 +1399,7 @@ class GameEngine:
             return GameResult("🧹 黑板擦陷阱！", f"一整排黑板擦从柜顶落下，失去 **{damage} 点体力**。", True)
         if trap == "ambush":
             player.enemy = self._make_monster(
-                player.floor, star=player.completion_count
+                player.floor, star=player.completion_count, player=player
             )
             ambush_damage = max(1, damage // 2)
             player.hp = round(max(0, player.hp - ambush_damage), 2)
@@ -1308,14 +1408,14 @@ class GameEngine:
             return GameResult("📣 走廊突击检查！", f"失去 **{ambush_damage} 点体力**，**{player.enemy.name}** 拦住了去路！", True)
         if trap == "rune":
             player.mp = round(max(0, player.mp - damage), 2)
-            return GameResult("📝 随堂测验陷阱！", f"试卷抽走了思考能力，失去 **{damage} 点魔力**。", True)
+            return GameResult("📝 随堂测验陷阱！", f"试卷抽走了思考能力，失去 **{damage} 点精神力**。", True)
         if trap == "thief":
             lost = min(player.gold, self.rng.randint(8, 20) * max(1, player.floor))
             player.gold -= lost
             chase_chance = self.raccoon_chase_chance(player)
             if lost > 0 and self.rng.random() < chase_chance:
                 player.enemy = self._make_monster(
-                    player.floor, star=player.completion_count
+                    player.floor, star=player.completion_count, player=player
                 )
                 player.enemy.name = f"{topic_for_floor(player.floor)}·蒙面浣熊"
                 player.enemy.catchphrase = "吱！追得上我，金币就还给你！"
@@ -1339,7 +1439,7 @@ class GameEngine:
         return GameResult(
             "🏥 你找到了校医室！",
             f"值班床铺与药柜散发着安心的气息。休息后最多恢复 **{20 + player.floor // 2} 体力、"
-            f"{12 + player.floor // 4} 魔力、14 精力**。",
+            f"{12 + player.floor // 4} 精神力、14 精力**。",
         )
 
     def _event_shop(self, player: Player) -> GameResult:
@@ -1348,15 +1448,15 @@ class GameEngine:
         player.merchant_refreshes = 0
         return GameResult(
             f"🧳 你遇到了旅行商人·{MERCHANT_NAME}！",
-            f"**{MERCHANT_NAME}** 推着塞满文具、药水和违禁零食的小车穿过走廊。"
-            "货物每次相遇都会变化：药剂常见，偶尔也会出现护符、武器或装备。",
+            f"**{MERCHANT_NAME}** 推着塞满文具、校园补给和违禁零食的小车穿过走廊。"
+            "货物每次相遇都会变化：药剂常见，偶尔也会出现竞赛加分、武器或装备。",
         )
 
     def _event_fairy(self, player: Player) -> GameResult:
         player.pending_event = "fairy"
         return GameResult(
             "🧑‍🎓 你遇到了忘带作业的新生！",
-            "她希望得到 **治疗药水 ×1**平复惊吓。帮助她可能获得金币、经验，极低概率获得魔法水晶。",
+            "她希望得到 **学生牛奶 ×1**平复惊吓。帮助她可能获得金币、经验，极低概率获得魔法水晶。",
         )
 
     def _event_mystery(self, player: Player) -> GameResult:
@@ -1398,11 +1498,11 @@ class GameEngine:
         player.pending_quiz = None
         if event == "small_boss":
             floor = player.floor if player.floor % 10 else max(1, player.floor - 1)
-            player.enemy = self._make_boss(floor, player.completion_count)
+            player.enemy = self._make_boss(floor, player.completion_count, player)
             return GameResult("⚠️ 你遇到了守层者！", f"**{player.enemy.name}** 前来接受测试！", True)
         if event == "major_boss":
             floor = player.floor if player.floor % 10 == 0 else player.floor + (10 - player.floor % 10)
-            player.enemy = self._make_boss(floor, player.completion_count)
+            player.enemy = self._make_boss(floor, player.completion_count, player)
             return GameResult("🔥 你遇到了大 Boss！", f"**{player.enemy.name}** 前来接受测试！", True)
         handlers = {
             "monster": self._event_monster,

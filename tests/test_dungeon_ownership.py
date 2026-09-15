@@ -1,0 +1,322 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from game.crystal import (
+    CRYSTAL_REWARDS as DUNGEON_ONE_CRYSTAL_REWARDS,
+    CRYSTAL_POOL_NAME as DUNGEON_ONE_POOL,
+    EQUIPMENT_ORIGIN as DUNGEON_ONE_ORIGIN,
+)
+from game.equipment import migrate_equipment_names as migrate_dungeon_one_equipment
+from game.models import Player as DungeonOnePlayer
+from game.shop import ARMORS as DUNGEON_ONE_ARMORS
+from game.shop import WEAPONS as DUNGEON_ONE_WEAPONS
+from game.shop import daily_stock as dungeon_one_daily_stock
+from game.storage import PlayerStore as DungeonOneStore
+from school_dungeon.game.crystal import (
+    CRYSTAL_REWARDS as DUNGEON_TWO_CRYSTAL_REWARDS,
+    CRYSTAL_POOL_NAME as DUNGEON_TWO_POOL,
+    EQUIPMENT_ORIGIN as DUNGEON_TWO_ORIGIN,
+    migrate_crystal_reward_names,
+)
+from school_dungeon.game.models import Player as DungeonTwoPlayer
+from school_dungeon.game.equipment import (
+    migrate_equipment_names as migrate_dungeon_two_equipment,
+)
+from school_dungeon.game.engine import GameEngine as DungeonTwoEngine
+from school_dungeon.game.school_content import SCHOOL_ZONES, monster_names_for_floor
+from school_dungeon.game.shop import ARMORS as DUNGEON_TWO_ARMORS
+from school_dungeon.game.shop import WEAPONS as DUNGEON_TWO_WEAPONS
+from school_dungeon.game.shop import daily_stock as dungeon_two_daily_stock
+from school_dungeon.game.storage import PlayerStore as DungeonTwoStore
+
+
+class DungeonOwnershipTests(unittest.TestCase):
+    def test_dungeon_one_never_uses_school_competition_bonus_wording(self):
+        project_root = Path(__file__).resolve().parents[1]
+        dungeon_one_text = "\n".join(
+            (project_root / relative_path).read_text(encoding="utf-8")
+            for relative_path in ("bot.py", "game/engine.py")
+        )
+        self.assertNotIn("竞赛加分", dungeon_one_text)
+        for charm_name in ("赤牙", "石纹", "风羽", "四叶"):
+            self.assertIn(charm_name, dungeon_one_text)
+
+    def test_shared_tavern_uses_two_stage_shop_and_crystal_selection(self):
+        project_root = Path(__file__).resolve().parents[1]
+        tavern_text = (project_root / "bot.py").read_text(encoding="utf-8")
+        for market_name in (
+            "幽灯岩窟金币商店",
+            "诡异学园金币商店",
+            "女巫的水晶秘藏",
+            "神秘研究社库藏",
+        ):
+            self.assertIn(market_name, tavern_text)
+        for route in (
+            "GoldShopDungeonChoiceView()",
+            "CrystalPoolChoiceView()",
+            "school_runtime.GoldShopPanel",
+            "school_runtime.CrystalExchangePanel",
+        ):
+            self.assertIn(route, tavern_text)
+        self.assertNotIn("TavernMarketSelect", tavern_text)
+
+    def test_shared_tavern_routes_tasks_equipment_and_profiles_by_dungeon(self):
+        project_root = Path(__file__).resolve().parents[1]
+        tavern_text = (project_root / "bot.py").read_text(encoding="utf-8")
+        for choice_name in (
+            "今日冒险委托",
+            "今日布置作业",
+            "冒险者装备库",
+            "学生物品栏",
+            "冒险者档案",
+            "学生档案",
+        ):
+            self.assertIn(choice_name, tavern_text)
+        for route in (
+            "DailyTaskChoiceView()",
+            "EquipmentCollectionChoiceView()",
+            "ProfileChoiceView()",
+            "school_runtime.daily_quest_embed",
+            "school_runtime.EquipmentLibraryPanel",
+            "school_runtime.inventory_embed",
+        ):
+            self.assertIn(route, tavern_text)
+
+    def test_dungeon_two_uses_student_identity_wording(self):
+        project_root = Path(__file__).resolve().parents[1]
+        dungeon_two_text = "\n".join(
+            (project_root / relative_path).read_text(encoding="utf-8")
+            for relative_path in (
+                "school_dungeon/runtime.py",
+                "school_dungeon/game/engine.py",
+            )
+        )
+        self.assertNotIn("冒险者", dungeon_two_text)
+        for wording in ("学生档案", "学生物品栏", "今日布置作业", "优秀学生"):
+            self.assertIn(wording, dungeon_two_text)
+
+    def test_profiles_equipment_and_crystals_remain_available_during_adventure(self):
+        project_root = Path(__file__).resolve().parents[1]
+        host_text = (project_root / "bot.py").read_text(encoding="utf-8")
+        school_text = (project_root / "school_dungeon/runtime.py").read_text(
+            encoding="utf-8",
+        )
+        blocker = 'reject_tavern_service(interaction, "酒馆角色面板")'
+        self.assertNotIn(blocker, host_text)
+        self.assertNotIn(blocker, school_text)
+        self.assertIn("探索途中也可以砸水晶", host_text)
+        self.assertIn("学园探索途中也可以砸水晶", school_text)
+        self.assertIn("EquipmentCollectionChoiceView()", host_text)
+
+    def test_only_gold_and_crystals_are_shared(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dungeon_one_path = Path(temp_dir) / "dungeon-one.db"
+            dungeon_two_path = Path(temp_dir) / "dungeon-two.db"
+            dungeon_one_store = DungeonOneStore(dungeon_one_path)
+
+            dungeon_one = dungeon_one_store.get(1, "测试者")
+            dungeon_one.gold = 500
+            dungeon_one.crystals = 9
+            dungeon_one.weapon = "地下城一测试剑"
+            dungeon_one.weapon_attack = 99
+            dungeon_one.equipment_inventory = {
+                "地下城一测试剑": {
+                    "name": "地下城一测试剑",
+                    "category": "武器",
+                    "rarity": "传说",
+                    "attack": 99,
+                    "defense": 0,
+                    "agility": 0,
+                    "luck": 0,
+                }
+            }
+            dungeon_one.crystal_equipment = {"d1_reward": 1}
+            dungeon_one_store.save(dungeon_one)
+
+            dungeon_two_store = DungeonTwoStore(
+                dungeon_two_path,
+                shared_path=dungeon_one_path,
+            )
+            dungeon_two = dungeon_two_store.get(1, "测试者")
+            self.assertEqual((dungeon_two.gold, dungeon_two.crystals), (500, 9))
+            self.assertNotEqual(dungeon_two.weapon, "地下城一测试剑")
+            self.assertNotIn("地下城一测试剑", dungeon_two.equipment_inventory)
+            self.assertNotIn("d1_reward", dungeon_two.crystal_equipment)
+
+            dungeon_two.weapon = "地下城二测试尺"
+            dungeon_two.weapon_attack = 77
+            dungeon_two.equipment_inventory = {
+                "地下城二测试尺": {
+                    "name": "地下城二测试尺",
+                    "category": "武器",
+                    "rarity": "黄金",
+                    "attack": 77,
+                    "defense": 0,
+                    "agility": 0,
+                    "luck": 0,
+                }
+            }
+            dungeon_two.crystal_equipment = {"d2_reward": 1}
+            dungeon_two.gold += 25
+            dungeon_two.crystals -= 3
+            dungeon_two_store.save(dungeon_two)
+
+            reloaded_one = dungeon_one_store.get(1, "测试者")
+            reloaded_two = dungeon_two_store.get(1, "测试者")
+            self.assertEqual((reloaded_one.gold, reloaded_one.crystals), (525, 6))
+            self.assertEqual((reloaded_two.gold, reloaded_two.crystals), (525, 6))
+            self.assertEqual(reloaded_one.weapon, "地下城一测试剑")
+            self.assertIn("地下城一测试剑", reloaded_one.equipment_inventory)
+            self.assertNotIn("地下城二测试尺", reloaded_one.equipment_inventory)
+            self.assertEqual(reloaded_one.crystal_equipment, {"d1_reward": 1})
+            self.assertEqual(reloaded_two.weapon, "地下城二测试尺")
+            self.assertIn("地下城二测试尺", reloaded_two.equipment_inventory)
+            self.assertNotIn("地下城一测试剑", reloaded_two.equipment_inventory)
+            self.assertEqual(reloaded_two.crystal_equipment, {"d2_reward": 1})
+
+    def test_crystal_pool_names_and_origins_are_distinct(self):
+        self.assertEqual(DUNGEON_ONE_POOL, "女巫的水晶秘藏")
+        self.assertEqual(DUNGEON_TWO_POOL, "神秘研究社库藏")
+        self.assertEqual(DUNGEON_ONE_ORIGIN, "地下城一")
+        self.assertEqual(DUNGEON_TWO_ORIGIN, "地下城二")
+
+    def test_gold_shop_equipment_pools_and_daily_stock_are_independent(self):
+        dungeon_one_names = {
+            item.name for item in DUNGEON_ONE_WEAPONS + DUNGEON_ONE_ARMORS
+        }
+        dungeon_two_names = {
+            item.name for item in DUNGEON_TWO_WEAPONS + DUNGEON_TWO_ARMORS
+        }
+        self.assertTrue(dungeon_one_names.isdisjoint(dungeon_two_names))
+
+        date_key = "2026-08-31"
+        dungeon_one_stock = [item.name for item in dungeon_one_daily_stock(date_key)]
+        dungeon_two_stock = [item.name for item in dungeon_two_daily_stock(date_key)]
+        self.assertNotEqual(dungeon_one_stock, dungeon_two_stock)
+        dungeon_one_daily_equipment = {
+            item.name for item in dungeon_one_daily_stock(date_key)
+            if item.category in {"武器", "护具"}
+        }
+        dungeon_two_daily_equipment = {
+            item.name for item in dungeon_two_daily_stock(date_key)
+            if item.category in {"武器", "护具"}
+        }
+        self.assertTrue(dungeon_one_daily_equipment.isdisjoint(dungeon_two_daily_equipment))
+
+    def test_dungeon_one_school_names_are_restored_to_fantasy_names(self):
+        player = DungeonOnePlayer(3, "测试者")
+        player.weapon = "铁制直尺"
+        player.weapon_attack = 7
+        player.equipment_inventory = {
+            "铁制直尺": {
+                "name": "铁制直尺", "category": "武器", "rarity": "普通",
+                "attack": 7, "defense": 0, "agility": 0, "luck": 0,
+            }
+        }
+        player.equipment_name_rules_version = 1
+
+        migrate_dungeon_one_equipment(player)
+
+        self.assertEqual(player.weapon, "铁制短剑")
+        self.assertIn("铁制短剑", player.equipment_inventory)
+        self.assertNotIn("铁制直尺", player.equipment_inventory)
+
+    def test_dungeon_two_starter_equipment_is_school_themed_and_migrated(self):
+        new_player = DungeonTwoPlayer(5, "新生")
+        self.assertEqual(new_player.weapon, "木制直尺")
+        self.assertEqual(new_player.clothing, "普通校服")
+
+        old_player = DungeonTwoPlayer(6, "老玩家")
+        old_player.weapon = "新手短剑"
+        old_player.clothing = "布衣"
+        old_player.equipment_inventory = {
+            "新手短剑": {
+                "name": "新手短剑", "category": "武器", "rarity": "普通",
+                "attack": 4, "defense": 0, "agility": 0, "luck": 0,
+            },
+            "布衣": {
+                "name": "布衣", "category": "护具", "rarity": "普通",
+                "attack": 0, "defense": 1, "agility": 0, "luck": 0,
+            },
+        }
+        old_player.equipment_name_rules_version = 1
+
+        migrate_dungeon_two_equipment(old_player)
+
+        self.assertEqual(old_player.weapon, "木制直尺")
+        self.assertEqual(old_player.clothing, "普通校服")
+        self.assertIn("木制直尺", old_player.equipment_inventory)
+        self.assertIn("普通校服", old_player.equipment_inventory)
+        self.assertNotIn("新手短剑", old_player.equipment_inventory)
+        self.assertNotIn("布衣", old_player.equipment_inventory)
+
+    def test_dungeon_two_student_adventurer_skills_use_school_names(self):
+        self.assertEqual(
+            [skill[0] for skill in DungeonTwoEngine.MAGIC_SKILLS.values()],
+            ["✨ 学识火花", "🔷 灵感光矢", "🌠 真理星雨"],
+        )
+
+    def test_all_three_hundred_dungeon_two_enemies_use_school_suffixes(self):
+        expected_suffixes = (
+            ("体育委员", "失控器材", "迟到检查员"),
+            ("活化涂鸦", "异常回声", "石膏像"),
+            ("孢子团", "细胞团", "活化标本"),
+            ("自动地图", "异常气象图", "失控地貌模型"),
+            ("错乱残卷", "活化甲胄模型", "错乱年表"),
+            ("失控试剂", "分子模型", "异常反应"),
+            ("失控仪器", "错误定律", "能量异常"),
+            ("语法错误", "错拼单词", "听力噪音"),
+            ("失控墨迹", "飞散书页", "错误批注"),
+            ("跳动数字", "失控公式", "错误演算"),
+        )
+        self.assertEqual(
+            tuple(zone.monster_forms for zone in SCHOOL_ZONES),
+            expected_suffixes,
+        )
+        names = [
+            name
+            for floor in range(1, 101)
+            for name in monster_names_for_floor(floor)
+        ]
+        self.assertEqual(len(names), 300)
+        self.assertEqual(len(set(names)), 300)
+
+    def test_dungeon_two_crystal_pool_names_and_legacy_items_are_migrated(self):
+        dungeon_one_names = {item.name for item in DUNGEON_ONE_CRYSTAL_REWARDS}
+        dungeon_two_names = {item.name for item in DUNGEON_TWO_CRYSTAL_REWARDS}
+        self.assertTrue(dungeon_one_names.isdisjoint(dungeon_two_names))
+        legendary = {
+            item.key: item.name
+            for item in DUNGEON_TWO_CRYSTAL_REWARDS
+            if item.rarity == "传说"
+        }
+        self.assertEqual(legendary, {
+            "legend_blade": "光荣榜榜首·相片",
+            "legend_robe": "光荣榜授勋礼装",
+            "legend_charm": "光荣榜榜首·徽章",
+            "legend_staff": "光荣榜榜首·宣言",
+        })
+
+        player = DungeonTwoPlayer(4, "测试者")
+        player.weapon = "永夜星穹"
+        player.weapon_attack = 36
+        player.equipment_inventory = {
+            "永夜星穹": {
+                "name": "永夜星穹", "category": "武器", "rarity": "传说",
+                "attack": 36, "defense": 0, "agility": 6, "luck": 6,
+            }
+        }
+        player.crystal_equipment = {"legend_blade": 1}
+        player.crystal_pool_name_rules_version = 0
+
+        migrate_crystal_reward_names(player)
+
+        self.assertEqual(player.weapon, "光荣榜榜首·相片")
+        self.assertIn("光荣榜榜首·相片", player.equipment_inventory)
+        self.assertNotIn("永夜星穹", player.equipment_inventory)
+        self.assertEqual(player.crystal_equipment, {"legend_blade": 1})
+
+
+if __name__ == "__main__":
+    unittest.main()

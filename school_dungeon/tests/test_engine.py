@@ -146,15 +146,15 @@ class EngineTests(unittest.TestCase):
             (player.max_hp, player.max_mp, player.max_energy),
         )
         self.assertIn("★1", result.message)
-        self.assertEqual(result.awarded_title, "❄️ 一星冒险者")
+        self.assertEqual(result.awarded_title, "❄️ 一星学生")
 
     def test_adventurer_titles_advance_and_fifth_clear_grants_beginner(self):
-        self.assertEqual(GameEngine.adventurer_title(1), "❄️ 一星冒险者")
-        self.assertEqual(GameEngine.adventurer_title(2), "❄️ 二星冒险者")
-        self.assertEqual(GameEngine.adventurer_title(3), "❄️ 三星冒险者")
-        self.assertEqual(GameEngine.adventurer_title(4), "❄️ 四星冒险者")
-        self.assertEqual(GameEngine.adventurer_title(5), "❄️ 初级冒险者")
-        self.assertEqual(GameEngine.adventurer_title(6), "❄️ 初级冒险者")
+        self.assertEqual(GameEngine.adventurer_title(1), "❄️ 一星学生")
+        self.assertEqual(GameEngine.adventurer_title(2), "❄️ 二星学生")
+        self.assertEqual(GameEngine.adventurer_title(3), "❄️ 三星学生")
+        self.assertEqual(GameEngine.adventurer_title(4), "❄️ 四星学生")
+        self.assertEqual(GameEngine.adventurer_title(5), "❄️ 优秀学生")
+        self.assertEqual(GameEngine.adventurer_title(6), "❄️ 优秀学生")
 
         engine = GameEngine(random.Random(1))
         player = Player(1, "五星勇者", floor=100, completion_count=4)
@@ -163,8 +163,8 @@ class EngineTests(unittest.TestCase):
         result = engine.attack(player)
 
         self.assertEqual(player.completion_count, 5)
-        self.assertEqual(result.awarded_title, "❄️ 初级冒险者")
-        self.assertIn("**❄️ 初级冒险者**", result.message)
+        self.assertEqual(result.awarded_title, "❄️ 优秀学生")
+        self.assertIn("**❄️ 优秀学生**", result.message)
 
     def test_star_difficulty_scales_enemy_hp_attack_and_exp(self):
         base_engine = GameEngine(random.Random(5))
@@ -177,6 +177,26 @@ class EngineTests(unittest.TestCase):
         self.assertAlmostEqual(star.max_hp / base.max_hp, 1.5, delta=0.02)
         self.assertAlmostEqual(star.attack / base.attack, 1.3, delta=0.03)
         self.assertGreater(star.exp_reward, base.exp_reward)
+
+    def test_school_difficulty_starts_gentle_and_grows_with_floor(self):
+        early_hp, early_attack = GameEngine.school_difficulty_multipliers(1)
+        deep_hp, deep_attack = GameEngine.school_difficulty_multipliers(100)
+
+        self.assertAlmostEqual(early_hp, 1.04)
+        self.assertAlmostEqual(early_attack, 1.03)
+        self.assertAlmostEqual(deep_hp, 1.20)
+        self.assertAlmostEqual(deep_attack, 1.15)
+
+    def test_school_difficulty_applies_to_monsters_and_bosses(self):
+        engine = GameEngine(random.Random(1))
+
+        early_monster = engine._make_monster(1)
+        deep_monster = engine._make_monster(100)
+        deep_boss = engine._make_boss(100)
+
+        self.assertEqual((early_monster.max_hp, early_monster.attack), (43, 10))
+        self.assertEqual((deep_monster.max_hp, deep_monster.attack), (571, 129))
+        self.assertEqual((deep_boss.max_hp, deep_boss.attack), (2018, 269))
 
     def test_defense_cannot_reduce_physical_damage_to_zero(self):
         self.assertEqual(GameEngine.physical_damage(100, 999), 15)
@@ -192,7 +212,7 @@ class EngineTests(unittest.TestCase):
 
         result = engine.attack(player)
 
-        self.assertEqual(result.title, "🔮 敌方魔法发动！")
+        self.assertEqual(result.title, "🔮 敌方招式发动！")
         self.assertLess(player.hp, 100)
         self.assertIn("腐蚀酸雨", result.message)
         self.assertIn("穿透", result.message)
@@ -448,7 +468,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(first.title, "🛍️ 购买成功")
         self.assertEqual(fourth.title, "🛍️ 购买成功")
         self.assertEqual(player.gold, 380)
-        self.assertEqual(player.consumables["治疗药水"], 6)
+        self.assertEqual(player.consumables["学生牛奶"], 6)
         self.assertNotIn("healing_potion", player.merchant_stock)
         self.assertEqual(len(player.merchant_stock), 2)
         self.assertEqual(player.pending_event, "merchant")
@@ -714,8 +734,8 @@ class EngineTests(unittest.TestCase):
         energy = engine.use_energy_potion(player)
         mana = engine.use_mana_potion(player)
 
-        self.assertEqual(mana.title, "💧 使用魔力药水")
-        self.assertEqual(energy.title, "⚡ 使用精力药水")
+        self.assertEqual(mana.title, "🧴 使用清凉油")
+        self.assertEqual(energy.title, "🥤 饮用运动饮料")
         self.assertEqual(player.mp, 26)
         self.assertEqual(player.energy, 27)
 
@@ -729,34 +749,34 @@ class EngineTests(unittest.TestCase):
         purchase = engine.buy_merchant_item(player, "greater_healing_potion")
 
         self.assertEqual(purchase.title, "🛍️ 购买成功")
-        self.assertEqual(player.consumables["强效治疗药水"], 1)
+        self.assertEqual(player.consumables["校园营养餐"], 1)
         self.assertLess(player.gold, 500)
 
         used = engine.use_potion(player)
 
-        self.assertEqual(used.title, "🧪 使用强效治疗药水")
+        self.assertEqual(used.title, "🍱 食用校园营养餐")
         self.assertEqual(player.hp, 80)
-        self.assertEqual(player.consumables["强效治疗药水"], 0)
+        self.assertEqual(player.consumables["校园营养餐"], 0)
 
     def test_deep_floor_can_offer_and_use_greater_energy_potion(self):
         engine = GameEngine(random.Random(1))
         player = Player(1, "深层勇者", floor=30, energy=0)
-        player.consumables = {"强效精力药水": 1}
+        player.consumables = {"安神补脑液": 1}
 
         result = engine.use_energy_potion(player)
 
-        self.assertEqual(result.title, "⚡ 使用强效精力药水")
+        self.assertEqual(result.title, "🧠 饮用安神补脑液")
         self.assertEqual(player.energy, 58)
-        self.assertEqual(player.consumables["强效精力药水"], 0)
+        self.assertEqual(player.consumables["安神补脑液"], 0)
 
     def test_greater_mana_potion_can_be_used(self):
         engine = GameEngine(random.Random(1))
         player = Player(1, "法师", mp=0, energy=10)
-        player.consumables = {"强效魔力药水": 1}
+        player.consumables = {"强劲薄荷糖": 1}
 
         result = engine.use_mana_potion(player)
 
-        self.assertEqual(result.title, "💧 使用强效魔力药水")
+        self.assertEqual(result.title, "🍬 食用强劲薄荷糖")
         self.assertEqual(player.mp, 50)
         self.assertEqual(player.energy, 8)
 

@@ -111,10 +111,33 @@ QUESTION_BANK: tuple[Question, ...] = (
 )
 
 
-def draw_question(subject: str, recent_keys: list[str], rng: random.Random) -> dict[str, object]:
-    pool = [item for item in QUESTION_BANK if item.subject == subject]
+CHARACTER_QUESTION_BANK: tuple[Question, ...] = (
+    q("char_guxingye_01", "角色卡", "顾星野标志性的发色更接近哪一种？", "浅黄色偏银色", ("纯黑色", "炽热红色", "银白色长发"), "顾星野的角色卡写明，他染着一头很有质感的浅黄色偏银色头发。"),
+    q("char_guxingye_02", "角色卡", "顾星野在国外尝试过什么创业项目？", "留学生跑腿平台", ("赛车改装厂", "穿刺纹身店", "金融咨询公司"), "他曾做过留学生跑腿平台，却因为太讲义气、常给兄弟免单而倒闭。"),
+    q("char_hanzhixu_01", "角色卡", "韩知序左手手腕处有什么明显特征？", "一颗小痣", ("月亮纹身", "旧刀疤", "黑钻耳钉"), "韩知序左手手腕处有一颗小痣，常被挽起的衬衫袖口半遮住。"),
+    q("char_hanzhixu_02", "角色卡", "韩知序的眼睛是什么颜色？", "浅褐色", ("深琥珀色", "黑曜石色", "红棕色"), "韩知序有一双清澈的浅褐色眼眸。"),
+    q("char_luzhiheng_01", "角色卡", "陆之衡脖子上常戴着什么？", "子弹壳项链", ("黑色阻隔项圈", "银色腰链", "学生铭牌"), "陆之衡的角色卡设定里，脖子上挂着一枚子弹壳做成的项链。"),
+    q("char_luzhiheng_02", "角色卡", "陆之衡主动申请去了哪类一线队伍？", "缉毒队", ("消防队", "交警队", "文职宣传科"), "警校毕业后，他拒绝机关文职，主动申请前往危险的一线缉毒队。"),
+    q("char_lutingran_01", "角色卡", "陆听燃所在男团的名字是？", "ECLIPSE", ("AURORA", "NOVA", "EMBER"), "陆听燃以男团 ECLIPSE 成员的身份出道。"),
+    q("char_lutingran_02", "角色卡", "陆听燃最标志性的发色是？", "炽热红色", ("浅黄色偏银色", "黑色狼尾", "银白色"), "陆听燃标志性地留着一头炽热的红色短碎发。"),
+    q("char_qinyu_01", "角色卡", "秦聿尾戒内圈刻着什么英文？", "Cut Losses", ("Stay Gold", "No Regrets", "Carpe Diem"), "秦聿用第一笔投资收益买下尾戒，内圈写着“Cut Losses”。"),
+    q("char_qinyu_02", "角色卡", "秦聿右手手腕内侧有什么特征？", "一颗红痣", ("一排字母纹身", "一道旧疤", "一颗黑痣"), "秦聿右手手腕内侧有一颗很显眼的红痣。"),
+    q("char_fuyiwang_01", "角色卡", "傅一妄的生日是？", "10月24日", ("8月15日", "9月15日", "12月31日"), "傅一妄的角色卡生日记录为10月24日。"),
+    q("char_fuyiwang_02", "角色卡", "傅一妄曾在哪类店铺打工？", "穿刺／纹身店", ("五星级酒店", "赛车改装厂", "留学生跑腿平台"), "傅一妄曾是穿刺／纹身店的打工小哥。"),
+    q("char_jiangwenyuan_01", "角色卡", "江闻远通常在什么场合佩戴眼镜？", "工作时", ("睡觉时", "健身时", "任何时候都不戴"), "江闻远只在工作时佩戴眼镜，非工作期间通常不会戴。"),
+    q("char_jiangwenyuan_02", "角色卡", "江闻远的生日是？", "12月31日", ("10月24日", "11月10日", "9月23日"), "江闻远的角色卡生日记录为12月31日。"),
+    q("char_liangyaowen_01", "角色卡", "梁曜文耳后的小纹身是什么图案？", "月亮", ("断裂枷锁", "子弹壳", "黑色玫瑰"), "梁曜文耳后有一个打赌输了以后留下的小月亮纹身。"),
+    q("char_qixiaochuan_01", "角色卡", "祁骁川日常覆盖口鼻与下颌的物件是？", "黑色合金止咬器", ("金丝边眼镜", "红色围巾", "防毒面具"), "祁骁川日常佩戴哑光黑色合金止咬器。"),
+)
+
+
+def _draw_from_pool(
+    pool: list[Question] | tuple[Question, ...],
+    recent_keys: list[str],
+    rng: random.Random,
+) -> dict[str, object]:
     if not pool:
-        raise ValueError(f"没有为科目 {subject} 配置题目")
+        raise ValueError("题库为空")
     fresh = [item for item in pool if item.key not in set(recent_keys)]
     fallback = [item for item in pool if not recent_keys or item.key != recent_keys[-1]]
     selected = rng.choice(fresh or fallback or pool)
@@ -131,13 +154,27 @@ def draw_question(subject: str, recent_keys: list[str], rng: random.Random) -> d
     }
 
 
+def draw_question(subject: str, recent_keys: list[str], rng: random.Random) -> dict[str, object]:
+    pool = [item for item in QUESTION_BANK if item.subject == subject]
+    if not pool:
+        raise ValueError(f"没有为科目 {subject} 配置题目")
+    return _draw_from_pool(pool, recent_keys, rng)
+
+
+def draw_character_question(recent_keys: list[str], rng: random.Random) -> dict[str, object]:
+    """从作者已有角色卡的已核实、非敏感设定中抽题。"""
+    return _draw_from_pool(CHARACTER_QUESTION_BANK, recent_keys, rng)
+
+
 def validate_question_bank() -> None:
-    keys = [item.key for item in QUESTION_BANK]
+    keys = [item.key for item in (*QUESTION_BANK, *CHARACTER_QUESTION_BANK)]
     if len(keys) != len(set(keys)):
         raise ValueError("题目编号不能重复")
     for subject in ("体育", "音乐美术", "生物", "地理", "历史", "化学", "物理", "英语", "语文", "数学"):
         if sum(item.subject == subject for item in QUESTION_BANK) < 8:
             raise ValueError(f"科目 {subject} 的初版题目少于8道")
+    if len(CHARACTER_QUESTION_BANK) < 12:
+        raise ValueError("高层 Boss 角色卡题目少于12道")
 
 
 validate_question_bank()
